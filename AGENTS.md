@@ -18,12 +18,13 @@ status:**
   `src/game-core/`, tests, lint, typecheck, CI.
 - ✅ **Goal 2 — Networking**: PartyKit room + lobby servers, zod protocol, server-side dice,
   reconnect/rejoin, integration tests against a real dev server.
-- ⬜ **Goal 3 — UI port**: React lobby/game/scorecard, GSAP animation, 3D dice, PWA, deploy.
-- ⬜ **Goal 4 — Harness + voice**: Puppeteer multi-browser sim, voice chat, HARNESS.md.
+- ✅ **Goal 3 — UI port**: React lobby/game/scorecard, GSAP motion system, 3D physics dice,
+  PWA (Serwist), two-browser E2E (`npm run e2e`), deploy-ready.
+- ⬜ **Goal 4 — Harness + voice**: N-player Puppeteer sim, voice chat, HARNESS.md.
 
 ## Architecture
 
-Three layers, two of which exist today:
+Three layers, all in place:
 
 1. **`src/game-core/`** *(exists)* — the pure, deterministic rules engine. No DOM, no network,
    no globals. Exports `createGame`, `applyAction` (the reducer), `calculateScore`, and the
@@ -35,11 +36,19 @@ Three layers, two of which exist today:
    ("main") holding the room directory (rooms push summaries to it over party-to-party HTTP)
    and global chat with replay. Every inbound message is zod-validated via
    `src/protocol/parseMessage` — **never call `JSON.parse` on client input directly**.
-3. **Next.js client** *(Goal 3)* — renders server state and sends actions via
+3. **Next.js client** *(exists)* — renders server state and sends actions via
    `src/lib/gameClient.ts` (`RoomClient`/`LobbyClient`: framework-free, auto-reconnecting,
-   works in Node for tests). Imports `game-core` only to *preview* scores locally; it never
+   works in Node for tests), wrapped for React by `src/hooks/useGameRoom.ts` and
+   `src/hooks/useLobby.ts`. Imports `game-core` only to *preview* scores locally; it never
    decides the real state. Rejoin = reconnect with the same `playerId`; the server re-seats
-   you and replies with the current snapshot.
+   you and replies with the current snapshot. Identity lives in localStorage
+   (`src/lib/identity.ts`); `?guest=<tag>` gives a per-tab sessionStorage identity so one
+   browser can hold multiple players (used by tests and manual two-tab testing).
+   The GSAP motion tokens live in `src/lib/motion.ts`; the 3D physics dice (Three.js +
+   cannon-es, ported from legacy) in `src/lib/dice3d.ts`, driven imperatively by
+   `GameRoom.tsx`. While the overlay is active, `body.dice3d-active` hides the 2D dice
+   (they remain as position targets); `body[data-dice-animating]` is set during a tumble —
+   tests use it to await animations.
 
 The wire protocol lives in `src/protocol/index.ts` — zod schemas for every message, with
 types inferred from them. Client→server schemas are `strict`: there is no field through which
@@ -93,9 +102,10 @@ one-off animations read as slop.
 | `npm run test:watch`       | Vitest in watch mode                                          |
 | `npm run test:integration` | Real client/server games against a self-booted `partykit dev` |
 | `npm run coverage`         | Tests with a coverage report (game-core is kept at 100%)      |
+| `npm run e2e`              | Two-browser Puppeteer game: full match, refresh-rejoin, animation checks (needs both dev servers running) |
 | `npm run typecheck`        | `tsc --noEmit` — strict type checking                         |
 | `npm run lint`             | ESLint (Next.js core-web-vitals + TypeScript rules)           |
-| `npm run build`            | Production build                                              |
+| `npm run build`            | Production build (also builds the service worker)             |
 
 Before considering any change done: `npm test`, `npm run typecheck`, and `npm run lint` must
 all pass — plus `npm run test:integration` for anything touching `party/`, `src/protocol/`, or
@@ -136,10 +146,17 @@ party/
   room.ts         authoritative game room (one instance per game)
   lobby.ts        singleton lobby: room directory + global chat
 src/
-  app/            Next.js App Router (placeholder UI until Goal 3)
+  app/            Next.js App Router: / (settings→lobby), /room/[roomId], sw.ts,
+                  manifest.ts, [path]/route.ts (serves the built service worker)
+  components/     GameRoom (orchestrator + GSAP choreography), Lobby,
+                  ScoreCards, SettingsForm, Toasts
+  hooks/          useGameRoom, useLobby, useWakeLock
   game-core/      pure rules engine + its tests (the heart of the project)
   protocol/       zod schemas for every wire message (shared client/server)
-  lib/            gameClient.ts — RoomClient/LobbyClient (framework-free)
+  lib/            gameClient (RoomClient/LobbyClient), motion (GSAP tokens),
+                  dice3d (3D physics dice), identity, config
+scripts/
+  e2e-game.mjs    two-browser full-game E2E (npm run e2e)
 tests/
   integration/    real-server tests: full games, rejoin, anti-cheat
 goals/            the four milestone briefs

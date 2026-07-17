@@ -27,8 +27,30 @@ roll.
 
 ```bash
 npm install
-npm run dev        # http://localhost:3000
+npm run party:dev  # PartyKit game servers (localhost:1999)
+npm run dev        # Next.js app → http://localhost:3000
 ```
+
+Open two browser windows (use `?guest=SomeName` in one to get a second identity
+from the same browser), create a room, join it, and play.
+
+## Deploying
+
+Two deploys, in this order:
+
+1. **PartyKit** (game servers):
+   ```bash
+   npx partykit deploy        # first run opens a login; note the printed host
+   ```
+2. **Vercel** (the app): set the env var `NEXT_PUBLIC_PARTYKIT_HOST` to the host
+   from step 1 (e.g. `5dice.<username>.partykit.dev`), then:
+   ```bash
+   npx vercel deploy --prod
+   ```
+
+The app is an installable PWA; a fresh deploy takes over on the next load
+(no stale-cache limbo — the service worker precaches hashed assets and
+serves documents network-first).
 
 ## Development
 
