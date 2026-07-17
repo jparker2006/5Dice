@@ -21,7 +21,7 @@ fresh session can execute it without any other context. Launch each one with:
 - [x] **Goal 2 — Networking**: PartyKit room server, zod protocol, server-side RNG, reconnect/rejoin, multi-client test
 - [x] **Goal 3 — UI port**: Lobby/game/scorecard in React, GSAP motion system, 3D dice, PWA, deploy-ready (deploy commands documented; needs PartyKit/Vercel logins)
 - [x] **Goal 4 — Harness + voice**: N-player Puppeteer sim (`npm run sim`), WebRTC voice chat, HARNESS.md
-- [ ] **Goal 5 — Visual overhaul**: design-skill-driven redesign of every screen (legacy look retired), GSAP set-pieces, restyled 3D dice, and the dice-truthfulness fix (settled faces == server dice, sim-asserted)
+- [x] **Goal 5 — Visual overhaul**: "felt game table" redesign of every screen (Fraunces + Figtree, gold/felt system in DESIGN.md), GSAP set-pieces, restyled ivory 3D dice, new app icons, and the dice-truthfulness fix (settled faces == server dice, sim-asserted)
 
 ## The overarching priority: a great agentic-coding harness
 

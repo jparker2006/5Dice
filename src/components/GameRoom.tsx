@@ -64,6 +64,8 @@ export function GameRoom({
 
   const screenRef = useRef<HTMLDivElement>(null);
   const statusRef = useRef<HTMLParagraphElement>(null);
+  const gameMainRef = useRef<HTMLElement>(null);
+  const trayRef = useRef<HTMLDivElement>(null);
   const dieRefs = useRef<(HTMLDivElement | null)[]>([null, null, null, null, null]);
   const dice3dRef = useRef<Dice3D | null>(null);
   const prevSnapRef = useRef<RoomSnapshot | null>(null);
@@ -186,22 +188,45 @@ export function GameRoom({
     }
   }, [snapshot, profile.playerId, setAnimatingBoth]);
 
-  // ---- background morph to the current player's color --------------------
+  // ---- atmosphere tints toward the current player's color ----------------
+  // Drives --turn-color, which the felt radial-gradient reads (see DESIGN.md).
   useEffect(() => {
     if (!screenRef.current) return;
-    let color = "#1a2a40";
+    let color = "#2b4a6e";
     if (game?.phase === "playing") {
-      color = seatFor(currentPid)?.color ?? "#1a2a40";
+      color = seatFor(currentPid)?.color ?? color;
     } else if (game?.phase === "gameover") {
       const winnerSeat = seatFor(game.winners[0] ?? null);
-      color = game.winners.length > 1 ? "#2a2a3e" : (winnerSeat?.color ?? "#1a2a40");
+      color = game.winners.length > 1 ? "#7a5a1f" : (winnerSeat?.color ?? color);
     }
-    tween([screenRef.current, document.body], {
-      backgroundColor: color,
+    tween(screenRef.current, {
+      "--turn-color": color,
       duration: durations.slow,
       ease: easings.glide,
     });
   }, [game?.phase, currentPid, game?.winners, seatFor, game]);
+
+  // ---- game screen entrance (set-piece: screen transition) ---------------
+  useEffect(() => {
+    if (gameMainRef.current && !prefersReducedMotion()) {
+      gsap.fromTo(
+        gameMainRef.current,
+        { opacity: 0, y: 20 },
+        { opacity: 1, y: 0, duration: durations.beat, ease: easings.out },
+      );
+    }
+  }, []);
+
+  // ---- turn handoff: pulse the tray when it becomes your turn -------------
+  useEffect(() => {
+    if (myTurn && trayRef.current && !prefersReducedMotion()) {
+      gsap.fromTo(
+        trayRef.current,
+        { scale: 0.975 },
+        { scale: 1, duration: durations.beat, ease: easings.bounce },
+      );
+    }
+  }, [myTurn]);
 
   // ---- status text swap ---------------------------------------------------
   const statusText = !snapshot
@@ -236,8 +261,8 @@ export function GameRoom({
     if (latest) {
       gsap.fromTo(
         latest,
-        { scale: 1.7, color: "#ffd34d" },
-        { scale: 1, color: "#f5f7fa", duration: durations.base, ease: easings.pop },
+        { scale: 1.8, color: "#f6cf72" },
+        { scale: 1, color: "#e8b24a", duration: durations.beat, ease: easings.pop },
       );
     }
   }, [game]);
@@ -254,19 +279,31 @@ export function GameRoom({
 
     const banner = document.querySelector("[data-winner-banner]");
     if (banner) {
-      timeline()
-        .fromTo(
-          banner,
-          { scale: 0.7, opacity: 0, y: 24 },
-          { scale: 1, opacity: 1, y: 0, duration: durations.slow, ease: easings.bounce },
+      const tl = timeline();
+      tl.fromTo(
+        banner,
+        { scale: 0.7, opacity: 0, y: 24 },
+        { scale: 1, opacity: 1, y: 0, duration: durations.slow, ease: easings.bounce },
+      );
+      // Podium reveal: the (already total-sorted) scorecard rows cascade in.
+      const rows = document.querySelectorAll('[data-testid="score-table"] tbody tr');
+      if (rows.length && !prefersReducedMotion()) {
+        tl.fromTo(
+          rows,
+          { opacity: 0, x: -12 },
+          { opacity: 1, x: 0, stagger: 0.035, duration: durations.base, ease: easings.out },
+          "<0.15",
         );
+      }
     }
     if (game.winners.includes(profile.playerId) && !prefersReducedMotion()) {
+      const gold = ["#e8b24a", "#f6cf72", "#b6832d", "#fff5ec", "#d9cdb8"];
       void import("canvas-confetti").then(({ default: confetti }) => {
-        void confetti({ particleCount: 160, spread: 75, origin: { y: 0.6 } });
+        void confetti({ particleCount: 170, spread: 78, origin: { y: 0.6 }, colors: gold });
         setTimeout(
-          () => void confetti({ particleCount: 80, spread: 100, origin: { y: 0.4 } }),
-          400,
+          () =>
+            void confetti({ particleCount: 90, spread: 110, origin: { y: 0.4 }, colors: gold }),
+          420,
         );
       });
     }
@@ -365,7 +402,7 @@ export function GameRoom({
         )}
       </header>
 
-      <main className="game-main">
+      <main ref={gameMainRef} className="game-main">
         <p ref={statusRef} className="game-status" data-testid="game-status">
           {statusText}
         </p>
@@ -406,7 +443,7 @@ export function GameRoom({
 
         {game && game.phase === "playing" && (
           <div className="dice-tray">
-            <div className="dice-row">
+            <div className="dice-row" ref={trayRef}>
               {displayDice.map((value, i) => (
                 <div
                   key={i}

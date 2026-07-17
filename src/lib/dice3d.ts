@@ -139,8 +139,9 @@ export class Dice3D {
       }),
     );
 
-    this.normalMaterials = this.createDiceMaterials("#f8f8f8", "#e0e0e0", "#222222");
-    this.heldMaterials = this.createDiceMaterials("#007BFF", "#0056b3", "#ffffff");
+    // Ivory dice with espresso pips; held dice take a warm gold tint.
+    this.normalMaterials = this.createDiceMaterials("#f4ede0", "#ddccae", "#241c14");
+    this.heldMaterials = this.createDiceMaterials("#f3d98c", "#c99a34", "#3a2a0e");
 
     for (let i = 0; i < 5; i++) {
       const geometry = new THREE.BoxGeometry(1, 1, 1);

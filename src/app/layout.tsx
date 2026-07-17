@@ -1,6 +1,24 @@
 import { SerwistProvider } from "@serwist/turbopack/react";
 import type { Metadata, Viewport } from "next";
+import { Fraunces, Figtree } from "next/font/google";
 import "./globals.css";
+
+// Display: warm, characterful high-contrast serif — the gold wordmark + titles.
+const fraunces = Fraunces({
+  subsets: ["latin"],
+  weight: ["600", "700", "900"],
+  style: ["normal", "italic"],
+  variable: "--font-display",
+  display: "swap",
+});
+
+// UI: clean modern sans with tabular figures (the scorecard depends on them).
+const figtree = Figtree({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800"],
+  variable: "--font-ui",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "5 Dice",
@@ -18,7 +36,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#1a2a40",
+  themeColor: "#13201a",
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
@@ -32,7 +50,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" className={`${fraunces.variable} ${figtree.variable}`}>
       <body>
         <SerwistProvider
           swUrl="/sw.js"

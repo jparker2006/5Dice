@@ -5,10 +5,11 @@
  */
 import gsap from "gsap";
 
-/** Seconds. quick = micro-interactions, base = most transitions, slow = celebrations. */
+/** Seconds. quick = micro-interactions, base = most transitions, slow/beat = set-pieces. */
 export const durations = {
   quick: 0.18,
   base: 0.38,
+  beat: 0.6,
   slow: 0.8,
 } as const;
 

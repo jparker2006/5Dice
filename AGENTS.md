@@ -84,25 +84,31 @@ the same code run on the server and in tests.
 
 ## Visual style & animation
 
-This game should feel **tactile and alive** — dice that tumble, scores that pop, colors that
-morph between turns. Polished motion is a first-class feature here, not decoration.
+**[`DESIGN.md`](DESIGN.md) is the full design source of truth — read it before any UI work and
+extend it, don't reinvent it.** The direction is an **"elevated felt game table"**: a warm,
+atmospheric dark table with a green-felt dice tray, ivory 3D dice, and gold accents; the
+background tints toward the **current player's color** (identity survives as light on the felt,
+not a flat flood). The legacy navy-utility look is retired.
 
-- **GSAP is the animation library.** ([gsap.com](https://gsap.com) — free, all plugins
-  included.) Reach for it for dice rolls, screen/scorecard transitions, score-commit flourishes,
-  turn-change color morphs, celebration effects, and button/hover micro-interactions. Prefer
-  GSAP timelines over ad-hoc CSS keyframes or `setInterval` animation. The **Flip** plugin is the
-  right tool for layout/position transitions (e.g. dice snapping into place); **Draggable** and
-  **MorphSVG** are available too.
-- **The bar is "intentional," not "linear."** Motion should ease, stagger, overshoot slightly,
-  and settle — never move at constant speed or snap without reason. Animate `transform` and
-  `opacity` (GPU-cheap), not `top`/`left`/`width`; target 60fps and avoid layout thrash.
-- **Centralize motion tokens.** Durations and easings live in one module (`src/lib/motion.ts`,
-  created in Goal 3) so animations feel like one system. Don't scatter magic numbers.
-- **Always respect `prefers-reduced-motion`** — provide a calm, instant fallback. Accessibility
-  and low-power devices matter; the game must be fully playable with motion off.
+- **Type**: **Fraunces** (`--font-display`) for the gold wordmark/titles, **Figtree**
+  (`--font-ui`) for everything else (tabular figures power the scorecard). Self-hosted via
+  `next/font` — no runtime font requests (PWA stays offline-capable). Never Inter/Roboto/system
+  as the brand face. *(next/font gotcha: a font can take `weight` OR `axes`, not both.)*
+- **Color**: warm tokens in `globals.css` `:root` — `--table*`/`--felt*` (atmosphere),
+  `--panel*` (surfaces), `--cream*` (ink), `--gold*` (accents — reserved for meaning, not
+  decoration), player accents (identity, kept AA-legible). The felt grain is one inline SVG on
+  `body::before`; the turn tint is `--turn-color`, GSAP-animated on `.game-screen`.
+- **GSAP** ([gsap.com](https://gsap.com), free) is the animation library. Tokens live in
+  `src/lib/motion.ts` (`durations` incl. `beat` for set-pieces, `easings`); the `tween`/`timeline`
+  wrappers collapse to instant under reduced motion. Set-pieces in place: turn handoff (bg morph +
+  status beat + tray pulse), score-commit pop, screen entrance, winner reveal (banner bounce +
+  gold confetti + podium row stagger), and micro-interactions (roll-coin press, held-die lift,
+  card/chip stagger, toasts).
+- **The bar is "intentional," not "linear."** Ease, stagger, overshoot, settle. Animate
+  `transform`/`opacity` only; 60fps; **always** honor `prefers-reduced-motion`.
 
-Consistency beats novelty: a few reused, well-tuned motions read as "designed," while many
-one-off animations read as slop.
+Consistency beats novelty: reuse the tokens and existing motions before inventing new ones —
+a few well-tuned ones read as "designed," many one-offs read as slop.
 
 ## Commands
 

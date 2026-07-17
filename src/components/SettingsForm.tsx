@@ -35,9 +35,21 @@ export function SettingsForm({
 
   return (
     <div className="screen">
-      <header className="top-header">
-        <h1>⚙️ {initial ? "Settings" : "Welcome to 5 Dice!"}</h1>
-      </header>
+      {initial ? (
+        <header className="top-header">
+          <h1>⚙️ Settings</h1>
+        </header>
+      ) : (
+        <div className="welcome-hero">
+          <div className="welcome-dice" aria-hidden>
+            <span className="hero-die die-5" />
+            <span className="hero-die die-2" />
+            <span className="hero-die die-6" />
+          </div>
+          <h1 className="welcome-title">5 Dice</h1>
+          <p className="welcome-tagline">Family dice night, anywhere.</p>
+        </div>
+      )}
       <div
         ref={panelRef}
         className="setup-container"
