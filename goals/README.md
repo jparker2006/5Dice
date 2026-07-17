@@ -15,7 +15,7 @@ fresh session can execute it without any other context. Launch each one with:
 
 ## Checklist
 
-- [ ] **Goal 1 — Foundation**: Next.js + TS scaffold, pure `game-core` with unit tests, CLAUDE.md, lint, CI
+- [ ] **Goal 1 — Foundation**: Next.js + TS scaffold, pure `game-core` with unit tests, AGENTS.md, lint, CI
 - [ ] **Goal 2 — Networking**: PartyKit room server, zod protocol, server-side RNG, reconnect/rejoin, multi-client test
 - [ ] **Goal 3 — UI port**: Lobby/game/scorecard in React, 3D dice, PWA, deployed to Vercel + PartyKit
 - [ ] **Goal 4 — Harness + voice**: Puppeteer multi-browser sim, voice chat over new signaling, HARNESS.md

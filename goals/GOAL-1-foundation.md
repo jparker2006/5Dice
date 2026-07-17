@@ -37,7 +37,7 @@ implementation — behavior parity matters, including quirks:
    simulated random game always terminates with a valid scorecard.
 5. Tooling: ESLint + `tsc --noEmit` typecheck script, `npm test`, and GitHub Actions CI
    running lint + typecheck + tests on push/PR.
-6. Write `CLAUDE.md` at repo root covering: what the app is, architecture (Next.js client /
+6. Write `AGENTS.md` at repo root (symlink `CLAUDE.md` → `AGENTS.md`) covering: what the app is, architecture (Next.js client /
    PartyKit authoritative server / game-core shared rules), the invariant that only the server
    mutates game state via the game-core reducer, commands (dev, test, lint, typecheck, sim),
    and pointer to `legacy/` as the behavioral reference.
@@ -51,4 +51,4 @@ implementation — behavior parity matters, including quirks:
       legacy `calculate5DiceScore` (verify by running the legacy function in the test).
 - [ ] `npm run lint` and `npm run typecheck` pass clean.
 - [ ] CI workflow is green on GitHub for the pushed branch.
-- [ ] CLAUDE.md exists and accurately describes commands (verify each command it lists actually runs).
+- [ ] AGENTS.md exists (with CLAUDE.md symlinked to it) and accurately describes commands (verify each command it lists actually runs).

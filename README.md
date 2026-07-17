@@ -40,12 +40,13 @@ npm run lint       # ESLint
 ```
 
 All three of test, typecheck, and lint run in CI on every push and pull request. See
-[`CLAUDE.md`](CLAUDE.md) for architecture and the core invariant that only the server mutates
+[`AGENTS.md`](AGENTS.md) for architecture and the core invariant that only the server mutates
 game state.
 
 ## Project layout
 
 ```
+AGENTS.md        agent/contributor guide (CLAUDE.md symlinks to it)
 src/app/         Next.js App Router (UI arrives in milestone 3)
 src/game-core/   the pure rules engine — the heart of the project
 goals/           the four milestone briefs

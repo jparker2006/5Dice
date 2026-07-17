@@ -54,11 +54,11 @@ this repo. Contents:
    architectural changes; one problem per session; let CI be the arbiter.
 3. **Repo invariants** agents must preserve (server-only state mutation, zod-validate all
    inbound messages, game-core stays pure and DOM-free).
-4. **How this repo is laid out for agents**: small modules, CLAUDE.md orientation, where the
+4. **How this repo is laid out for agents**: small modules, AGENTS.md orientation, where the
    reference implementation lives (`legacy/`).
 5. Keep it short enough to actually read (≤ 2 pages).
 
-Also update CLAUDE.md with the sim command and voice architecture.
+Also update AGENTS.md (the canonical agent guide; CLAUDE.md symlinks to it) with the sim command and voice architecture.
 
 ## Done-criteria
 
@@ -70,5 +70,5 @@ Also update CLAUDE.md with the sim command and voice architecture.
       'connected' on the audio peer connection); mic/speaker toggles work; a voice failure
       (e.g. blocked mic) leaves the game fully playable.
 - [ ] 3+ player rooms create one audio element per remote peer.
-- [ ] HARNESS.md exists, is accurate (every command in it runs), and CLAUDE.md is updated.
+- [ ] HARNESS.md exists, is accurate (every command in it runs), and AGENTS.md is updated.
 - [ ] Lint, typecheck, all tests, CI green.
