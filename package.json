@@ -14,7 +14,9 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "coverage": "vitest run --coverage",
     "party:dev": "partykit dev",
-    "e2e": "node scripts/e2e-game.mjs"
+    "e2e": "node scripts/sim.mjs --players=2",
+    "sim": "node scripts/sim.mjs",
+    "voice": "node scripts/voice-test.mjs"
   },
   "dependencies": {
     "cannon-es": "^0.20.0",

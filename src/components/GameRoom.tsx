@@ -13,6 +13,7 @@ import {
   type ScoreableCategory,
 } from "@/game-core";
 import { useGameRoom } from "@/hooks/useGameRoom";
+import { useVoice } from "@/hooks/useVoice";
 import { useWakeLock } from "@/hooks/useWakeLock";
 import { Dice3D } from "@/lib/dice3d";
 import {
@@ -50,6 +51,16 @@ export function GameRoom({
   const room = useGameRoom(roomId, profile, create);
   const { snapshot } = room;
   const game = snapshot?.game ?? null;
+
+  // Voice chat: seated peers other than me (stable-sorted for the mesh).
+  const voicePeers = useMemo(
+    () =>
+      (snapshot?.seats ?? [])
+        .map((s) => s.playerId)
+        .filter((id) => id !== profile.playerId),
+    [snapshot?.seats, profile.playerId],
+  );
+  const voice = useVoice(room.client, profile.playerId, voicePeers);
 
   const screenRef = useRef<HTMLDivElement>(null);
   const statusRef = useRef<HTMLParagraphElement>(null);
@@ -89,7 +100,13 @@ export function GameRoom({
   // ---- 3D dice lifecycle -------------------------------------------------
   useEffect(() => {
     if (prefersReducedMotion()) return;
-    const dice = new Dice3D(document.body);
+    let dice: Dice3D;
+    try {
+      dice = new Dice3D(document.body);
+    } catch {
+      // No WebGL on this device — fall back to the 2D dice, game unaffected.
+      return;
+    }
     dice3dRef.current = dice;
     return () => {
       dice.destroy();
@@ -322,6 +339,30 @@ export function GameRoom({
           ⬅️
         </button>
         <h1>🎲 {snapshot?.name || "5 Dice"} 🎲</h1>
+        {voice.supported && (
+          <div className="audio-controls">
+            <button
+              className={`audio-btn ${voice.speakerOn ? "" : "off"} ${voice.remoteAudio ? "live" : ""}`}
+              aria-label={voice.speakerOn ? "Mute speaker" : "Unmute speaker"}
+              aria-pressed={voice.speakerOn}
+              data-testid="btn-speaker"
+              onClick={voice.toggleSpeaker}
+              title={voice.remoteAudio ? "Someone is talking" : "Speaker"}
+            >
+              {voice.speakerOn ? "🔊" : "🔇"}
+            </button>
+            <button
+              className={`audio-btn ${voice.micOn ? "on" : "off"}`}
+              aria-label={voice.micOn ? "Turn off microphone" : "Turn on microphone"}
+              aria-pressed={voice.micOn}
+              data-testid="btn-mic"
+              onClick={voice.toggleMic}
+              title="Microphone"
+            >
+              {voice.micOn ? "🎙️" : "🎤"}
+            </button>
+          </div>
+        )}
       </header>
 
       <main className="game-main">

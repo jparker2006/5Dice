@@ -18,7 +18,7 @@ fresh session can execute it without any other context. Launch each one with:
 - [x] **Goal 1 — Foundation**: Next.js + TS scaffold, pure `game-core` with unit tests, AGENTS.md, lint, CI
 - [x] **Goal 2 — Networking**: PartyKit room server, zod protocol, server-side RNG, reconnect/rejoin, multi-client test
 - [x] **Goal 3 — UI port**: Lobby/game/scorecard in React, GSAP motion system, 3D dice, PWA, deploy-ready (deploy commands documented; needs PartyKit/Vercel logins)
-- [ ] **Goal 4 — Harness + voice**: Puppeteer multi-browser sim, voice chat over new signaling, HARNESS.md
+- [x] **Goal 4 — Harness + voice**: N-player Puppeteer sim (`npm run sim`), WebRTC voice chat, HARNESS.md
 
 ## The overarching priority: a great agentic-coding harness
 

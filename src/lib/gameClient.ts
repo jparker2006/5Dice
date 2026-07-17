@@ -13,10 +13,12 @@ import {
   roomServerMessageSchema,
   type ChatMessage,
   type ErrorCode,
+  type PlayerId,
   type Profile,
   type RoomServerMessage,
   type RoomSnapshot,
   type RoomSummary,
+  type VoiceSignal,
   type WireGameAction,
 } from "@/protocol";
 
@@ -24,6 +26,7 @@ export interface RoomClientEvents {
   snapshot: (snapshot: RoomSnapshot) => void;
   error: (code: ErrorCode, detail?: string) => void;
   connection: (open: boolean) => void;
+  voiceSignal: (from: PlayerId, signal: VoiceSignal) => void;
 }
 
 export interface RoomClientOptions {
@@ -37,7 +40,7 @@ export interface RoomClientOptions {
 export class RoomClient {
   private socket: PartySocket;
   private listeners: { [K in keyof RoomClientEvents]: RoomClientEvents[K][] } =
-    { snapshot: [], error: [], connection: [] };
+    { snapshot: [], error: [], connection: [], voiceSignal: [] };
   /** The latest authoritative snapshot, for synchronous reads. */
   snapshot: RoomSnapshot | null = null;
 
@@ -71,6 +74,8 @@ export class RoomClient {
       if (msg.type === "room") {
         this.snapshot = msg.snapshot;
         this.emit("snapshot", msg.snapshot);
+      } else if (msg.type === "voice-signal") {
+        this.emit("voiceSignal", msg.from, msg.signal);
       } else {
         this.emit("error", msg.code, msg.detail);
       }
@@ -120,6 +125,10 @@ export class RoomClient {
 
   leave(): void {
     this.send({ type: "leave" });
+  }
+
+  sendVoiceSignal(to: PlayerId, signal: VoiceSignal): void {
+    this.send({ type: "voice-signal", to, signal });
   }
 
   close(): void {

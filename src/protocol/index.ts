@@ -12,7 +12,9 @@
  * connection, not from message content.
  */
 import { z } from "zod";
-import { SCOREABLE_CATEGORIES, type GameState } from "@/game-core";
+import { SCOREABLE_CATEGORIES, type GameState, type PlayerId } from "@/game-core";
+
+export type { PlayerId };
 
 export const PROTOCOL_VERSION = 1;
 
@@ -46,6 +48,28 @@ export const gameActionSchema = z.discriminatedUnion("type", [
 ]);
 export type WireGameAction = z.infer<typeof gameActionSchema>;
 
+/**
+ * WebRTC voice signaling, relayed peer-to-peer by the room server. The server
+ * only forwards these between two authenticated players in the room — it never
+ * interprets them, so the bodies are validated loosely (bounded in size to
+ * prevent abuse). Voice never touches game state.
+ */
+export const voiceSignalSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("description"),
+    sdpType: z.enum(["offer", "answer", "pranswer", "rollback"]),
+    sdp: z.string().max(20000),
+  }),
+  z.strictObject({
+    kind: z.literal("candidate"),
+    candidate: z.string().max(1200),
+    sdpMid: z.string().max(100).nullable().optional(),
+    sdpMLineIndex: z.number().int().nullable().optional(),
+    usernameFragment: z.string().max(256).nullable().optional(),
+  }),
+]);
+export type VoiceSignal = z.infer<typeof voiceSignalSchema>;
+
 // ---------------------------------------------------------------------------
 // Room party: client → server
 // ---------------------------------------------------------------------------
@@ -66,6 +90,11 @@ export const roomClientMessageSchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("action"), action: gameActionSchema }),
   z.strictObject({ type: z.literal("playAgain") }),
   z.strictObject({ type: z.literal("leave") }),
+  z.strictObject({
+    type: z.literal("voice-signal"),
+    to: playerIdSchema,
+    signal: voiceSignalSchema,
+  }),
 ]);
 export type RoomClientMessage = z.infer<typeof roomClientMessageSchema>;
 
@@ -143,12 +172,18 @@ export const roomServerMessageSchema = z.discriminatedUnion("type", [
     code: errorCodeSchema,
     detail: z.string().optional(),
   }),
+  z.object({
+    type: z.literal("voice-signal"),
+    from: playerIdSchema,
+    signal: voiceSignalSchema,
+  }),
 ]);
 /** Declared manually (not inferred) so `snapshot` carries the RoomSnapshot
  * override above; the schema still validates the identical wire shape. */
 export type RoomServerMessage =
   | { type: "room"; snapshot: RoomSnapshot }
-  | { type: "error"; code: ErrorCode; detail?: string };
+  | { type: "error"; code: ErrorCode; detail?: string }
+  | { type: "voice-signal"; from: PlayerId; signal: VoiceSignal };
 
 // ---------------------------------------------------------------------------
 // Lobby party

@@ -123,6 +123,20 @@ export default class RoomServer implements Party.Server {
         await this.notifyLobby();
         return;
       }
+      case "voice-signal": {
+        // Pure relay between two seated players — the server never interprets
+        // the WebRTC payload, and voice is fully isolated from game state.
+        if (msg.to === playerId) return;
+        const out = JSON.stringify({
+          type: "voice-signal",
+          from: playerId,
+          signal: msg.signal,
+        });
+        for (const conn of this.room.getConnections<ConnState>()) {
+          if (conn.state?.playerId === msg.to) conn.send(out);
+        }
+        return;
+      }
     }
   }
 

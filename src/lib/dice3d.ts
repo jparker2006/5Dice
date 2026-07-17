@@ -73,7 +73,14 @@ export class Dice3D {
     this.camera.up.set(0, 0, -1);
     this.camera.lookAt(0, 0, 0);
 
-    this.renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+    // A device without WebGL must not crash the game — the caller catches this
+    // and falls back to the 2D dice.
+    try {
+      this.renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+    } catch (err) {
+      this.container.remove();
+      throw err;
+    }
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.container.appendChild(this.renderer.domElement);
 

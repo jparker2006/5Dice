@@ -19,8 +19,9 @@ status:**
 - ✅ **Goal 2 — Networking**: PartyKit room + lobby servers, zod protocol, server-side dice,
   reconnect/rejoin, integration tests against a real dev server.
 - ✅ **Goal 3 — UI port**: React lobby/game/scorecard, GSAP motion system, 3D physics dice,
-  PWA (Serwist), two-browser E2E (`npm run e2e`), deploy-ready.
-- ⬜ **Goal 4 — Harness + voice**: N-player Puppeteer sim, voice chat, HARNESS.md.
+  PWA (Serwist), two-browser E2E, deploy-ready.
+- ✅ **Goal 4 — Harness + voice**: N-player Puppeteer sim (`npm run sim`), WebRTC voice chat,
+  and [`HARNESS.md`](HARNESS.md) — the vibecoding guide.
 
 ## Architecture
 
@@ -54,6 +55,14 @@ The wire protocol lives in `src/protocol/index.ts` — zod schemas for every mes
 types inferred from them. Client→server schemas are `strict`: there is no field through which
 a client can supply dice values or act as another player (the actor comes from the connection,
 never message content). When you add a message type, add its schema here first.
+
+**Voice chat** *(exists)* is a small WebRTC audio mesh (`src/lib/voice.ts`, `src/hooks/useVoice.ts`),
+signaled by relaying `voice-signal` messages through the room server (which never interprets
+them). One `RTCPeerConnection` and one `<audio>` element per remote peer; perfect-negotiation
+handles glare. STUN only (Google's public server) — no TURN, so symmetric-NAT users may not get
+voice, and that's fine: **voice is fully isolated — a mic or peer failure never touches game
+state or reconnection.** Each peer audio element mirrors its connection state onto
+`dataset.state` so the harness can assert "connected".
 
 ## The load-bearing invariant
 
@@ -102,15 +111,19 @@ one-off animations read as slop.
 | `npm run test:watch`       | Vitest in watch mode                                          |
 | `npm run test:integration` | Real client/server games against a self-booted `partykit dev` |
 | `npm run coverage`         | Tests with a coverage report (game-core is kept at 100%)      |
-| `npm run e2e`              | Two-browser Puppeteer game: full match, refresh-rejoin, animation checks (needs both dev servers running) |
+| `npm run sim`              | Flagship harness: N real browsers play a full game with chaos (`--players=N`, 2–6) — boots its own servers |
+| `npm run e2e`              | Fast 2-player alias of the sim                                |
+| `npm run voice`           | Voice-chat test: two fake-media browsers establish audio      |
 | `npm run typecheck`        | `tsc --noEmit` — strict type checking                         |
 | `npm run lint`             | ESLint (Next.js core-web-vitals + TypeScript rules)           |
 | `npm run build`            | Production build (also builds the service worker)             |
 
 Before considering any change done: `npm test`, `npm run typecheck`, and `npm run lint` must
 all pass — plus `npm run test:integration` for anything touching `party/`, `src/protocol/`, or
-`src/lib/gameClient.ts` (it boots its own server on port 19990; nothing to start manually).
-CI (`.github/workflows/ci.yml`) runs all of it on every push and PR.
+`src/lib/gameClient.ts` (it boots its own server on port 19990; nothing to start manually), and
+`npm run sim` for anything that could affect multiplayer. CI (`.github/workflows/ci.yml`) runs
+typecheck/lint/unit/integration on every push and PR; the sim runs on demand (`workflow_dispatch`).
+See [`HARNESS.md`](HARNESS.md) for the full verification ladder and vibecoding guidance.
 
 ## Verifying your work — run it in a browser
 
@@ -137,26 +150,27 @@ without a console error and looks correct at both sizes" as a required gate, the
 tsconfig and eslint). It is the **behavioral source of truth** for game rules: when porting a
 rule, match its behavior. `scoring.test.ts` even extracts the original `calculate5DiceScore`
 from `legacy/five-dice.js` and asserts our port matches it for all 7,776 dice combinations.
-`legacy/dice3d.js` is the 3D dice renderer to be ported in Goal 3. Never delete `legacy/`.
+`legacy/dice3d.js` is the 3D dice renderer (ported in Goal 3). Never delete `legacy/`.
 
 ## Layout
 
 ```
 party/
-  room.ts         authoritative game room (one instance per game)
+  room.ts         authoritative game room (one instance per game); relays voice
   lobby.ts        singleton lobby: room directory + global chat
 src/
   app/            Next.js App Router: / (settings→lobby), /room/[roomId], sw.ts,
                   manifest.ts, [path]/route.ts (serves the built service worker)
   components/     GameRoom (orchestrator + GSAP choreography), Lobby,
                   ScoreCards, SettingsForm, Toasts
-  hooks/          useGameRoom, useLobby, useWakeLock
+  hooks/          useGameRoom, useLobby, useVoice, useWakeLock
   game-core/      pure rules engine + its tests (the heart of the project)
   protocol/       zod schemas for every wire message (shared client/server)
   lib/            gameClient (RoomClient/LobbyClient), motion (GSAP tokens),
-                  dice3d (3D physics dice), identity, config
+                  dice3d (3D physics dice), voice (WebRTC mesh), identity, config
 scripts/
-  e2e-game.mjs    two-browser full-game E2E (npm run e2e)
+  sim.mjs         flagship N-browser sim with chaos (npm run sim / e2e)
+  voice-test.mjs  fake-media voice-connection test (npm run voice)
 tests/
   integration/    real-server tests: full games, rejoin, anti-cheat
 goals/            the four milestone briefs

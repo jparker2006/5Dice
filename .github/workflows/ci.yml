@@ -4,6 +4,8 @@ on:
   push:
     branches: ["**"]
   pull_request:
+  # The browser sim is slow (minutes) and needs Chrome — run it on demand.
+  workflow_dispatch:
 
 jobs:
   verify:
@@ -31,3 +33,35 @@ jobs:
 
       - name: Integration tests (real partykit dev server)
         run: npm run test:integration
+
+  sim:
+    # Full multi-browser sim — on-demand only (workflow_dispatch), not per-push.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chrome for Puppeteer
+        run: npx puppeteer browsers install chrome
+
+      - name: Multi-browser sim (3 players)
+        run: npm run sim -- --players=3
+
+      - name: Voice-chat test
+        run: npm run voice
+
+      - name: Upload sim artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sim-output
+          path: sim-output/
+          if-no-files-found: ignore
