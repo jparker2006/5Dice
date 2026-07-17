@@ -1,16 +1,17 @@
 /**
- * The authoritative game room. One PartyKit room instance exists per game;
- * it owns the single true GameState, rolls all dice server-side, and routes
- * every player action through game-core's `applyAction`. Clients only ever
- * receive snapshots — they cannot mutate state.
+ * The authoritative game room — a Cloudflare Durable Object (partyserver).
+ * One instance per game; it owns the single true GameState, rolls all dice
+ * server-side, and routes every player action through game-core's applyAction.
+ * Clients only ever receive snapshots — they cannot mutate state.
  */
-import type * as Party from "partykit/server";
+import { Server, getServerByName, type Connection, type WSMessage } from "partyserver";
+import type { LobbyServer } from "./lobby";
 import {
   applyAction,
   createGame,
   type GameState,
   type PlayerId,
-} from "@/game-core";
+} from "../src/game-core";
 import {
   PROTOCOL_VERSION,
   parseMessage,
@@ -19,7 +20,8 @@ import {
   type RoomServerMessage,
   type RoomSnapshot,
   type RoomSummary,
-} from "@/protocol";
+} from "../src/protocol";
+import type { Env } from "./types";
 
 interface RoomConfig {
   name: string;
@@ -38,42 +40,37 @@ type ConnState = { playerId: PlayerId } | null;
 /** How long an abandoned room lingers before it self-destructs. */
 const EMPTY_ROOM_TTL_MS = 10 * 60 * 1000;
 
-export default class RoomServer implements Party.Server {
+export class RoomServer extends Server<Env> {
   private config: RoomConfig | null = null;
   private seats: StoredSeat[] = [];
   private game: GameState | null = null;
   private loaded = false;
 
-  constructor(readonly room: Party.Room) {}
-
-  /** Lazily hydrate from storage so rooms survive server restarts. */
+  /** Lazily hydrate from storage so rooms survive DO eviction/restarts. */
   private async load(): Promise<void> {
     if (this.loaded) return;
-    this.config = (await this.room.storage.get<RoomConfig>("config")) ?? null;
-    this.seats = (await this.room.storage.get<StoredSeat[]>("seats")) ?? [];
-    this.game = (await this.room.storage.get<GameState>("game")) ?? null;
+    this.config = (await this.ctx.storage.get<RoomConfig>("config")) ?? null;
+    this.seats = (await this.ctx.storage.get<StoredSeat[]>("seats")) ?? [];
+    this.game = (await this.ctx.storage.get<GameState>("game")) ?? null;
     this.loaded = true;
   }
 
   private async persist(): Promise<void> {
-    await this.room.storage.put("config", this.config);
-    await this.room.storage.put("seats", this.seats);
-    await this.room.storage.put("game", this.game);
+    await this.ctx.storage.put("config", this.config);
+    await this.ctx.storage.put("seats", this.seats);
+    await this.ctx.storage.put("game", this.game);
   }
 
-  async onConnect(conn: Party.Connection<ConnState>): Promise<void> {
+  async onConnect(conn: Connection<ConnState>): Promise<void> {
     await this.load();
     conn.setState(null);
     // A live connection cancels any pending self-destruct.
-    await this.room.storage.deleteAlarm();
+    await this.ctx.storage.deleteAlarm();
   }
 
-  async onMessage(
-    raw: string,
-    sender: Party.Connection<ConnState>,
-  ): Promise<void> {
+  async onMessage(sender: Connection<ConnState>, message: WSMessage): Promise<void> {
     await this.load();
-    const msg = parseMessage(raw, roomClientMessageSchema);
+    const msg = parseMessage(message, roomClientMessageSchema);
     if (!msg) return this.sendError(sender, "bad-message");
 
     if (msg.type === "join") {
@@ -132,7 +129,7 @@ export default class RoomServer implements Party.Server {
           from: playerId,
           signal: msg.signal,
         });
-        for (const conn of this.room.getConnections<ConnState>()) {
+        for (const conn of this.getConnections<ConnState>()) {
           if (conn.state?.playerId === msg.to) conn.send(out);
         }
         return;
@@ -143,7 +140,7 @@ export default class RoomServer implements Party.Server {
   private async handleJoin(
     profile: { playerId: PlayerId; name: string; color: string },
     create: { roomName: string; maxPlayers: number } | undefined,
-    sender: Party.Connection<ConnState>,
+    sender: Connection<ConnState>,
   ): Promise<void> {
     if (!this.config) {
       if (!create) return this.sendError(sender, "room-not-found");
@@ -190,15 +187,13 @@ export default class RoomServer implements Party.Server {
     if (this.connectedPlayerIds().size === 0) {
       // Everyone left — schedule cleanup instead of dying immediately so a
       // reconnecting player finds their game intact.
-      await this.room.storage.setAlarm(Date.now() + EMPTY_ROOM_TTL_MS);
+      await this.ctx.storage.setAlarm(Date.now() + EMPTY_ROOM_TTL_MS);
     }
   }
 
   async onAlarm(): Promise<void> {
-    // Note: no `this.room.getConnections()` here — alarms can fire on a fresh
-    // instance, but if anyone were connected the alarm would have been deleted.
     await this.notifyLobbyRemove();
-    await this.room.storage.deleteAll();
+    await this.ctx.storage.deleteAll();
     this.config = null;
     this.seats = [];
     this.game = null;
@@ -210,7 +205,7 @@ export default class RoomServer implements Party.Server {
 
   private connectedPlayerIds(): Set<PlayerId> {
     const ids = new Set<PlayerId>();
-    for (const conn of this.room.getConnections<ConnState>()) {
+    for (const conn of this.getConnections<ConnState>()) {
       if (conn.state?.playerId) ids.add(conn.state.playerId);
     }
     return ids;
@@ -219,7 +214,7 @@ export default class RoomServer implements Party.Server {
   private snapshot(): RoomSnapshot {
     const connected = this.connectedPlayerIds();
     return {
-      roomId: this.room.id,
+      roomId: this.name,
       name: this.config?.name ?? "",
       maxPlayers: this.config?.maxPlayers ?? 2,
       phase: this.game ? this.game.phase : "waiting",
@@ -233,11 +228,11 @@ export default class RoomServer implements Party.Server {
 
   private async broadcastSnapshot(): Promise<void> {
     const msg: RoomServerMessage = { type: "room", snapshot: this.snapshot() };
-    this.room.broadcast(JSON.stringify(msg));
+    this.broadcast(JSON.stringify(msg));
   }
 
   private sendError(
-    conn: Party.Connection<ConnState>,
+    conn: Connection<ConnState>,
     code: ErrorCode,
     detail?: string,
   ): void {
@@ -246,12 +241,12 @@ export default class RoomServer implements Party.Server {
   }
 
   // -------------------------------------------------------------------------
-  // Lobby notifications (server → server)
+  // Lobby notifications (DO → DO)
   // -------------------------------------------------------------------------
 
   private summary(): RoomSummary {
     return {
-      roomId: this.room.id,
+      roomId: this.name,
       name: this.config?.name ?? "",
       maxPlayers: this.config?.maxPlayers ?? 2,
       seatsFilled: this.seats.length,
@@ -266,13 +261,17 @@ export default class RoomServer implements Party.Server {
   }
 
   private async notifyLobbyRemove(): Promise<void> {
-    await this.lobbyFetch({ kind: "remove", roomId: this.room.id });
+    await this.lobbyFetch({ kind: "remove", roomId: this.name });
   }
 
   private async lobbyFetch(body: unknown): Promise<void> {
     try {
-      const lobby = this.room.context.parties.lobby!.get("main");
-      await lobby.fetch({ method: "POST", body: JSON.stringify(body) });
+      const ns = this.env.Lobby as DurableObjectNamespace<LobbyServer>;
+      const lobby = await getServerByName(ns, "main");
+      await lobby.fetch("https://do/notify", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
     } catch (err) {
       // The lobby being briefly unreachable must never break a game.
       console.error("lobby notify failed:", err);

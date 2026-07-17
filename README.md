@@ -10,14 +10,15 @@ behavioral reference for all game rules.
 
 ## Status
 
-Built in four milestones (see [`goals/`](goals/README.md)):
+Built in milestones (see [`goals/`](goals/README.md)):
 
 | Milestone                    | State | What it delivers                                             |
 | ---------------------------- | :---: | ------------------------------------------------------------ |
 | **1. Foundation**            |  ✅   | Next.js scaffold, pure tested game engine, lint/typecheck/CI |
-| **2. Server networking**     |  ⬜   | PartyKit authoritative room server, server-side dice         |
-| **3. UI port**               |  ⬜   | React lobby/game/scorecard, 3D dice, installable PWA, deploy |
-| **4. Harness + voice**       |  ⬜   | Multi-browser Puppeteer sim, voice chat, agent harness docs  |
+| **2. Server networking**     |  ✅   | Cloudflare Durable Objects authoritative room server, server-side dice |
+| **3. UI port**               |  ✅   | React lobby/game/scorecard, 3D dice, installable PWA         |
+| **4. Harness + voice**       |  ✅   | Multi-browser Puppeteer sim, voice chat, agent harness docs  |
+| **5. Visual overhaul**       |  ✅   | "Felt game table" redesign, GSAP set-pieces, honest 3D dice  |
 
 The **game engine** (`src/game-core/`) is complete: pure, deterministic, and covered 100% by
 tests — including a parity check against the original scoring function across every possible
@@ -27,7 +28,7 @@ roll.
 
 ```bash
 npm install
-npm run party:dev  # PartyKit game servers (localhost:1999)
+npm run party:dev  # game servers via wrangler dev (localhost:1999)
 npm run dev        # Next.js app → http://localhost:3000
 ```
 
@@ -36,14 +37,16 @@ from the same browser), create a room, join it, and play.
 
 ## Deploying
 
-Two deploys, in this order:
+The game servers run on **Cloudflare Durable Objects** (via partyserver); the app
+runs on **Vercel**. Two deploys, in this order:
 
-1. **PartyKit** (game servers):
+1. **Cloudflare** (game servers):
    ```bash
-   npx partykit deploy        # first run opens a login; note the printed host
+   npx wrangler login          # one-time Cloudflare OAuth
+   npm run deploy              # wrangler deploy → note the printed *.workers.dev host
    ```
-2. **Vercel** (the app): set the env var `NEXT_PUBLIC_PARTYKIT_HOST` to the host
-   from step 1 (e.g. `5dice.<username>.partykit.dev`), then:
+2. **Vercel** (the app): set the env var `NEXT_PUBLIC_GAME_HOST` to the host from
+   step 1 (e.g. `5dice.<subdomain>.workers.dev`), then:
    ```bash
    npx vercel deploy --prod
    ```

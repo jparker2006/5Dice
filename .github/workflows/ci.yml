@@ -31,7 +31,7 @@ jobs:
       - name: Test (with coverage)
         run: npm run coverage
 
-      - name: Integration tests (real partykit dev server)
+      - name: Integration tests (real wrangler dev server)
         run: npm run test:integration
 
   sim:

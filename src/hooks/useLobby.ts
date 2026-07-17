@@ -4,7 +4,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { LobbyClient } from "@/lib/gameClient";
-import { PARTYKIT_HOST } from "@/lib/config";
+import { GAME_HOST } from "@/lib/config";
 import type { ChatMessage, Profile, RoomSummary } from "@/protocol";
 
 export interface LobbyState {
@@ -22,7 +22,7 @@ export function useLobby(profile: Profile | null): LobbyState {
 
   useEffect(() => {
     if (!profile) return;
-    const client = new LobbyClient({ host: PARTYKIT_HOST, profile });
+    const client = new LobbyClient({ host: GAME_HOST, profile });
     clientRef.current = client;
     const offs = [
       client.on("rooms", setRooms),

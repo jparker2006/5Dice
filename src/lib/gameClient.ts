@@ -1,5 +1,5 @@
 /**
- * Thin, framework-free client for the PartyKit servers. No React in here —
+ * Thin, framework-free client for the game servers (Cloudflare / partyserver). No React in here —
  * Goal 3 wraps this in hooks. Works in browsers and in Node (tests/sim).
  *
  * Reconnection is handled by PartySocket (exponential backoff built in); on

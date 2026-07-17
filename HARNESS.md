@@ -16,7 +16,7 @@ the change demands.
 | Types | `npm run typecheck` | it compiles under strict TS | every change |
 | Lint | `npm run lint` | style + React-hooks rules | every change |
 | Unit | `npm test` | game-core rules (100% covered) | any rules/scoring change |
-| Integration | `npm run test:integration` | the PartyKit protocol, rejoin, anti-cheat | any `party/`, `protocol/`, or `gameClient` change |
+| Integration | `npm run test:integration` | the server protocol, rejoin, anti-cheat | any `party/`, `protocol/`, or `gameClient` change |
 | **Look at it** | `npm run dev` + a browser | it *looks* right and the animation plays | any UI/animation change |
 | Sim | `npm run sim` | N real browsers play a full game with chaos | any change that could affect multiplayer |
 | Voice | `npm run voice` | WebRTC audio connects between browsers | any `voice`/signaling change |

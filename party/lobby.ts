@@ -1,9 +1,10 @@
 /**
- * The lobby: a singleton party (room id "main") that tracks the directory of
- * open game rooms and hosts the global chat. Room parties push their status
- * here over party-to-party HTTP; browsers hold a WebSocket for live updates.
+ * The lobby — a Cloudflare Durable Object (partyserver), addressed as room
+ * "main". It tracks the directory of open game rooms and hosts the global chat.
+ * Room DOs push their status here via DO-to-DO fetch; browsers hold a WebSocket
+ * for live updates.
  */
-import type * as Party from "partykit/server";
+import { Server, type Connection, type WSMessage } from "partyserver";
 import {
   PROTOCOL_VERSION,
   lobbyClientMessageSchema,
@@ -13,7 +14,8 @@ import {
   type LobbyServerMessage,
   type Profile,
   type RoomSummary,
-} from "@/protocol";
+} from "../src/protocol";
+import type { Env } from "./types";
 
 type ConnState = { profile: Profile } | null;
 
@@ -21,24 +23,22 @@ const MAX_CHATS = 50;
 /** Rooms that haven't been heard from in this long are considered dead. */
 const ROOM_STALE_MS = 30 * 60 * 1000;
 
-export default class LobbyServer implements Party.Server {
+export class LobbyServer extends Server<Env> {
   private rooms = new Map<string, RoomSummary>();
   private chats: ChatMessage[] = [];
   private loaded = false;
 
-  constructor(readonly room: Party.Room) {}
-
   private async load(): Promise<void> {
     if (this.loaded) return;
-    const rooms = await this.room.storage.get<[string, RoomSummary][]>("rooms");
+    const rooms = await this.ctx.storage.get<[string, RoomSummary][]>("rooms");
     this.rooms = new Map(rooms ?? []);
-    this.chats = (await this.room.storage.get<ChatMessage[]>("chats")) ?? [];
+    this.chats = (await this.ctx.storage.get<ChatMessage[]>("chats")) ?? [];
     this.loaded = true;
   }
 
   private async persist(): Promise<void> {
-    await this.room.storage.put("rooms", [...this.rooms.entries()]);
-    await this.room.storage.put("chats", this.chats);
+    await this.ctx.storage.put("rooms", [...this.rooms.entries()]);
+    await this.ctx.storage.put("chats", this.chats);
   }
 
   private liveRooms(): RoomSummary[] {
@@ -49,7 +49,7 @@ export default class LobbyServer implements Party.Server {
     return [...this.rooms.values()].sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
-  async onConnect(conn: Party.Connection<ConnState>): Promise<void> {
+  async onConnect(conn: Connection<ConnState>): Promise<void> {
     await this.load();
     conn.setState(null);
     const msg: LobbyServerMessage = {
@@ -60,12 +60,9 @@ export default class LobbyServer implements Party.Server {
     conn.send(JSON.stringify(msg));
   }
 
-  async onMessage(
-    raw: string,
-    sender: Party.Connection<ConnState>,
-  ): Promise<void> {
+  async onMessage(sender: Connection<ConnState>, message: WSMessage): Promise<void> {
     await this.load();
-    const msg = parseMessage(raw, lobbyClientMessageSchema);
+    const msg = parseMessage(message, lobbyClientMessageSchema);
     if (!msg) return this.sendError(sender, "bad-message");
 
     if (msg.type === "hello") {
@@ -94,12 +91,12 @@ export default class LobbyServer implements Party.Server {
       }
       await this.persist();
       const out: LobbyServerMessage = { type: "chat", chat };
-      this.room.broadcast(JSON.stringify(out));
+      this.broadcast(JSON.stringify(out));
     }
   }
 
-  /** Party-to-party endpoint: room servers push their summaries here. */
-  async onRequest(req: Party.Request): Promise<Response> {
+  /** DO-to-DO endpoint: room servers push their summaries here. */
+  async onRequest(req: Request): Promise<Response> {
     await this.load();
     if (req.method !== "POST") {
       return new Response("method not allowed", { status: 405 });
@@ -115,12 +112,12 @@ export default class LobbyServer implements Party.Server {
     await this.persist();
 
     const out: LobbyServerMessage = { type: "rooms", rooms: this.liveRooms() };
-    this.room.broadcast(JSON.stringify(out));
+    this.broadcast(JSON.stringify(out));
     return new Response("ok");
   }
 
   private sendError(
-    conn: Party.Connection<ConnState>,
+    conn: Connection<ConnState>,
     code: "bad-message" | "must-join-first" | "version-mismatch",
   ): void {
     const msg: LobbyServerMessage = { type: "error", code };

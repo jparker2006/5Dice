@@ -7,7 +7,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { RoomClient } from "@/lib/gameClient";
-import { PARTYKIT_HOST } from "@/lib/config";
+import { GAME_HOST } from "@/lib/config";
 import type { ScoreableCategory } from "@/game-core";
 import type { ErrorCode, Profile, RoomSnapshot } from "@/protocol";
 
@@ -41,7 +41,7 @@ export function useGameRoom(
   useEffect(() => {
     if (!profile) return;
     const c = new RoomClient({
-      host: PARTYKIT_HOST,
+      host: GAME_HOST,
       roomId,
       profile,
       create: createRef.current,

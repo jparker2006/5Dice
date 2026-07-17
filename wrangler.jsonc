@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "5dice",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-07-01",
+  "durable_objects": {
+    "bindings": [
+      { "name": "Main", "class_name": "RoomServer" },
+      { "name": "Lobby", "class_name": "LobbyServer" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["RoomServer", "LobbyServer"] }
+  ],
+  "observability": { "enabled": true }
+}

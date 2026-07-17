@@ -2,7 +2,7 @@
 /**
  * WebRTC voice chat: a small audio mesh between the players in a room.
  *
- * Signaling is relayed through the PartyKit room server (see the voice-signal
+ * Signaling is relayed through the game room server (see the voice-signal
  * protocol messages) — no public MQTT, no public TURN. STUN is Google's public
  * server; without TURN, players behind symmetric NATs may not connect, and
  * that's fine: **voice is fully isolated from the game.** Every failure path

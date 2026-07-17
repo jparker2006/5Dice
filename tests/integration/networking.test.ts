@@ -1,5 +1,5 @@
 /**
- * End-to-end tests against a real `partykit dev` server (see global-setup).
+ * End-to-end tests against a real `wrangler dev` server (see global-setup).
  * Real RoomClients play real games; every assertion is against state the
  * server broadcast, never against local bookkeeping.
  */

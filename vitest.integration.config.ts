@@ -6,8 +6,8 @@ export default defineConfig({
     environment: "node",
     globalSetup: ["tests/integration/global-setup.ts"],
     testTimeout: 90_000,
-    hookTimeout: 60_000,
-    // The tests share one partykit dev instance; run files sequentially.
+    hookTimeout: 160_000,
+    // The tests share one wrangler dev instance; run files sequentially.
     fileParallelism: false,
   },
   resolve: {

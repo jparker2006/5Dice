@@ -1,5 +1,5 @@
 /**
- * The wire protocol between clients and the PartyKit servers.
+ * The wire protocol between clients and the game servers (Cloudflare / partyserver).
  *
  * Every message that crosses the network is defined here as a zod schema, and
  * BOTH sides use it: the server parses every inbound client message (never

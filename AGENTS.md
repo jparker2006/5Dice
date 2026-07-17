@@ -16,8 +16,8 @@ status:**
 
 - ✅ **Goal 1 — Foundation**: Next.js scaffold, the pure game engine in
   `src/game-core/`, tests, lint, typecheck, CI.
-- ✅ **Goal 2 — Networking**: PartyKit room + lobby servers, zod protocol, server-side dice,
-  reconnect/rejoin, integration tests against a real dev server.
+- ✅ **Goal 2 — Networking**: server-authoritative room + lobby servers (Cloudflare Durable
+  Objects via partyserver), zod protocol, server-side dice, reconnect/rejoin, integration tests.
 - ✅ **Goal 3 — UI port**: React lobby/game/scorecard, GSAP motion system, 3D physics dice,
   PWA (Serwist), two-browser E2E, deploy-ready.
 - ✅ **Goal 4 — Harness + voice**: N-player Puppeteer sim (`npm run sim`), WebRTC voice chat,
@@ -33,13 +33,18 @@ Three layers, all in place:
 1. **`src/game-core/`** *(exists)* — the pure, deterministic rules engine. No DOM, no network,
    no globals. Exports `createGame`, `applyAction` (the reducer), `calculateScore`, and the
    scorecard totals. RNG is injected, so games are reproducible under test.
-2. **Authoritative server** *(exists — `party/`)* — PartyKit. `party/room.ts` is one instance
-   per game: it seats players, auto-starts when full, holds the one true `GameState` in room
-   storage (survives restarts; empty rooms self-destruct after 10 minutes), rolls all dice
-   server-side, and routes every action through `applyAction`. `party/lobby.ts` is a singleton
-   ("main") holding the room directory (rooms push summaries to it over party-to-party HTTP)
-   and global chat with replay. Every inbound message is zod-validated via
-   `src/protocol/parseMessage` — **never call `JSON.parse` on client input directly**.
+2. **Authoritative server** *(exists — `party/` + `worker/`)* — **Cloudflare Durable Objects via
+   [partyserver](https://github.com/cloudflare/partykit)** (the client still speaks `partysocket`,
+   so the wire is unchanged). `party/room.ts` (`RoomServer`, DO) is one instance per game: it
+   seats players, auto-starts when full, holds the one true `GameState` in DO storage (survives
+   eviction; empty rooms self-destruct after 10 minutes), rolls all dice server-side, and routes
+   every action through `applyAction`. `party/lobby.ts` (`LobbyServer`, DO) is a singleton ("main")
+   holding the room directory (rooms push summaries to it via DO-to-DO fetch) and global chat with
+   replay. `worker/index.ts` is the Worker entry (routes `/parties/<party>/<room>` via
+   `routePartykitRequest`; binding `Main`→room, `Lobby`→lobby). Every inbound message is
+   zod-validated via `src/protocol/parseMessage` — **never call `JSON.parse` on client input
+   directly**. Config is `wrangler.jsonc`; the worker code has its own `tsconfig.worker.json`
+   (Cloudflare Workers types) and is excluded from the app tsconfig — `npm run typecheck` runs both.
 3. **Next.js client** *(exists)* — renders server state and sends actions via
    `src/lib/gameClient.ts` (`RoomClient`/`LobbyClient`: framework-free, auto-reconnecting,
    works in Node for tests), wrapped for React by `src/hooks/useGameRoom.ts` and
@@ -115,10 +120,10 @@ a few well-tuned ones read as "designed," many one-offs read as slop.
 | Command                    | What it does                                                  |
 | -------------------------- | ------------------------------------------------------------- |
 | `npm run dev`              | Next.js dev server (http://localhost:3000)                    |
-| `npm run party:dev`        | PartyKit dev server (rooms + lobby, http://localhost:1999)    |
+| `npm run party:dev`        | Game servers via `wrangler dev` (rooms + lobby, http://localhost:1999) |
 | `npm test`                 | Unit tests (game-core), sub-second                            |
 | `npm run test:watch`       | Vitest in watch mode                                          |
-| `npm run test:integration` | Real client/server games against a self-booted `partykit dev` |
+| `npm run test:integration` | Real client/server games against a self-booted `wrangler dev`  |
 | `npm run coverage`         | Tests with a coverage report (game-core is kept at 100%)      |
 | `npm run sim`              | Flagship harness: N real browsers play a full game with chaos (`--players=N`, 2–6) — boots its own servers |
 | `npm run e2e`              | Fast 2-player alias of the sim                                |
@@ -165,8 +170,11 @@ from `legacy/five-dice.js` and asserts our port matches it for all 7,776 dice co
 
 ```
 party/
-  room.ts         authoritative game room (one instance per game); relays voice
-  lobby.ts        singleton lobby: room directory + global chat
+  room.ts         RoomServer DO — authoritative game room (one per game); relays voice
+  lobby.ts        LobbyServer DO — singleton lobby: room directory + global chat
+  types.ts        Durable Object env bindings
+worker/
+  index.ts        Cloudflare Worker entry (routePartykitRequest → the two DOs)
 src/
   app/            Next.js App Router: / (settings→lobby), /room/[roomId], sw.ts,
                   manifest.ts, [path]/route.ts (serves the built service worker)
@@ -182,7 +190,7 @@ scripts/
   voice-test.mjs  fake-media voice-connection test (npm run voice)
 tests/
   integration/    real-server tests: full games, rejoin, anti-cheat
-goals/            the four milestone briefs
+goals/            the milestone briefs
 legacy/           the original vanilla-JS game (reference only)
-partykit.json     PartyKit config (main = room party, "lobby" party alongside)
+wrangler.jsonc    Cloudflare Worker + Durable Object config (Main = room, Lobby = lobby)
 ```

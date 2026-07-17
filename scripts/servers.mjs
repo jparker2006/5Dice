@@ -1,8 +1,9 @@
 /**
  * Shared dev-server management for the browser harness scripts. Each script is
- * self-contained: it boots `next dev` + `partykit dev` if they aren't already
- * running, and stops only the ones it started (so a locally-running dev setup
- * is reused and left alone, while CI gets a fresh pair per script).
+ * self-contained: it boots `next dev` + `wrangler dev` (the Cloudflare game
+ * servers) if they aren't already running, and stops only the ones it started
+ * (so a locally-running dev setup is reused and left alone, while CI gets a
+ * fresh pair per script).
  */
 import { spawn } from "node:child_process";
 import net from "node:net";
@@ -24,28 +25,30 @@ function portOpen(port) {
 export async function ensureServers(log = () => {}) {
   const spawned = [];
   if (!(await portOpen(PK_PORT))) {
-    log("· booting partykit dev…");
+    log("· booting wrangler dev (game servers)…");
     spawned.push(
-      spawn("npx", ["partykit", "dev", "--port", String(PK_PORT)], {
-        stdio: "ignore",
-        detached: true,
-      }),
+      spawn(
+        "npx",
+        ["wrangler", "dev", "--port", String(PK_PORT), "--log-level", "error"],
+        { stdio: "ignore", detached: true },
+      ),
     );
   }
   if (!(await portOpen(NEXT_PORT))) {
     log("· booting next dev…");
     spawned.push(spawn("npm", ["run", "dev"], { stdio: "ignore", detached: true }));
   }
-  const deadline = Date.now() + 90_000;
+  // wrangler dev may download workerd + compile on a cold start.
+  const deadline = Date.now() + 150_000;
   while (Date.now() < deadline) {
     if ((await portOpen(PK_PORT)) && (await portOpen(NEXT_PORT))) {
-      // Give a freshly-booted next dev a beat to finish its first compile.
-      await sleep(spawned.length ? 3500 : 0);
+      // Give a freshly-booted server a beat to finish its first compile.
+      await sleep(spawned.length ? 5000 : 0);
       return spawned;
     }
     await sleep(500);
   }
-  throw new Error("dev servers did not come up within 90s");
+  throw new Error("dev servers did not come up within 150s");
 }
 
 /** Stop the processes ensureServers spawned (whole process group). */

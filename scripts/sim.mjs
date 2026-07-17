@@ -17,7 +17,7 @@
  *   - The 3D dice actually animate (one browser runs full motion).
  *   - Any console error in any browser fails the run.
  *
- * Boots `next dev` + `partykit dev` itself if they aren't already running.
+ * Boots `next dev` + `wrangler dev` itself if they aren't already running.
  * Always writes state screenshots to sim-output/; on failure also dumps full
  * per-browser screenshots and console logs there.
  */

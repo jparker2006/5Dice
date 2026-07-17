@@ -36,3 +36,7 @@ yarn-error.log*
 
 # partykit
 .partykit
+
+# cloudflare / wrangler
+.wrangler/
+worker-configuration.d.ts
