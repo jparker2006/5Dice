@@ -14,23 +14,37 @@ of a vanilla-JS peer-to-peer original (preserved under `legacy/`, by JefParker) 
 The rebuild is happening in four milestones tracked in [`goals/`](goals/README.md). **Milestone
 status:**
 
-- ✅ **Goal 1 — Foundation** (this milestone): Next.js scaffold, the pure game engine in
+- ✅ **Goal 1 — Foundation**: Next.js scaffold, the pure game engine in
   `src/game-core/`, tests, lint, typecheck, CI.
-- ⬜ **Goal 2 — Networking**: PartyKit room server, zod protocol, server-side dice.
-- ⬜ **Goal 3 — UI port**: React lobby/game/scorecard, 3D dice, PWA, deploy.
+- ✅ **Goal 2 — Networking**: PartyKit room + lobby servers, zod protocol, server-side dice,
+  reconnect/rejoin, integration tests against a real dev server.
+- ⬜ **Goal 3 — UI port**: React lobby/game/scorecard, GSAP animation, 3D dice, PWA, deploy.
 - ⬜ **Goal 4 — Harness + voice**: Puppeteer multi-browser sim, voice chat, HARNESS.md.
 
 ## Architecture
 
-Three layers, one of which exists today:
+Three layers, two of which exist today:
 
 1. **`src/game-core/`** *(exists)* — the pure, deterministic rules engine. No DOM, no network,
    no globals. Exports `createGame`, `applyAction` (the reducer), `calculateScore`, and the
    scorecard totals. RNG is injected, so games are reproducible under test.
-2. **Authoritative server** *(Goal 2 — PartyKit)* — will hold exactly one `GameState` per room,
-   roll all dice server-side, and route every player action through `applyAction`.
-3. **Next.js client** *(Goal 3)* — renders server state and sends actions. Imports `game-core`
-   only to *preview* scores locally; it never decides the real state.
+2. **Authoritative server** *(exists — `party/`)* — PartyKit. `party/room.ts` is one instance
+   per game: it seats players, auto-starts when full, holds the one true `GameState` in room
+   storage (survives restarts; empty rooms self-destruct after 10 minutes), rolls all dice
+   server-side, and routes every action through `applyAction`. `party/lobby.ts` is a singleton
+   ("main") holding the room directory (rooms push summaries to it over party-to-party HTTP)
+   and global chat with replay. Every inbound message is zod-validated via
+   `src/protocol/parseMessage` — **never call `JSON.parse` on client input directly**.
+3. **Next.js client** *(Goal 3)* — renders server state and sends actions via
+   `src/lib/gameClient.ts` (`RoomClient`/`LobbyClient`: framework-free, auto-reconnecting,
+   works in Node for tests). Imports `game-core` only to *preview* scores locally; it never
+   decides the real state. Rejoin = reconnect with the same `playerId`; the server re-seats
+   you and replies with the current snapshot.
+
+The wire protocol lives in `src/protocol/index.ts` — zod schemas for every message, with
+types inferred from them. Client→server schemas are `strict`: there is no field through which
+a client can supply dice values or act as another player (the actor comes from the connection,
+never message content). When you add a message type, add its schema here first.
 
 ## The load-bearing invariant
 
@@ -71,18 +85,22 @@ one-off animations read as slop.
 
 ## Commands
 
-| Command             | What it does                                             |
-| ------------------- | -------------------------------------------------------- |
-| `npm run dev`       | Next.js dev server (http://localhost:3000)               |
-| `npm test`          | Run the Vitest suite once                                |
-| `npm run test:watch`| Vitest in watch mode                                     |
-| `npm run coverage`  | Tests with a coverage report (game-core is kept at 100%) |
-| `npm run typecheck` | `tsc --noEmit` — strict type checking                    |
-| `npm run lint`      | ESLint (Next.js core-web-vitals + TypeScript rules)      |
-| `npm run build`     | Production build                                          |
+| Command                    | What it does                                                  |
+| -------------------------- | ------------------------------------------------------------- |
+| `npm run dev`              | Next.js dev server (http://localhost:3000)                    |
+| `npm run party:dev`        | PartyKit dev server (rooms + lobby, http://localhost:1999)    |
+| `npm test`                 | Unit tests (game-core), sub-second                            |
+| `npm run test:watch`       | Vitest in watch mode                                          |
+| `npm run test:integration` | Real client/server games against a self-booted `partykit dev` |
+| `npm run coverage`         | Tests with a coverage report (game-core is kept at 100%)      |
+| `npm run typecheck`        | `tsc --noEmit` — strict type checking                         |
+| `npm run lint`             | ESLint (Next.js core-web-vitals + TypeScript rules)           |
+| `npm run build`            | Production build                                              |
 
 Before considering any change done: `npm test`, `npm run typecheck`, and `npm run lint` must
-all pass. CI (`.github/workflows/ci.yml`) runs the same three on every push and PR.
+all pass — plus `npm run test:integration` for anything touching `party/`, `src/protocol/`, or
+`src/lib/gameClient.ts` (it boots its own server on port 19990; nothing to start manually).
+CI (`.github/workflows/ci.yml`) runs all of it on every push and PR.
 
 ## Verifying your work — run it in a browser
 
@@ -114,9 +132,17 @@ from `legacy/five-dice.js` and asserts our port matches it for all 7,776 dice co
 ## Layout
 
 ```
+party/
+  room.ts         authoritative game room (one instance per game)
+  lobby.ts        singleton lobby: room directory + global chat
 src/
   app/            Next.js App Router (placeholder UI until Goal 3)
   game-core/      pure rules engine + its tests (the heart of the project)
+  protocol/       zod schemas for every wire message (shared client/server)
+  lib/            gameClient.ts — RoomClient/LobbyClient (framework-free)
+tests/
+  integration/    real-server tests: full games, rejoin, anti-cheat
 goals/            the four milestone briefs
 legacy/           the original vanilla-JS game (reference only)
+partykit.json     PartyKit config (main = room party, "lobby" party alongside)
 ```
