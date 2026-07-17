@@ -1,7 +1,8 @@
 # 5Dice Rebuild — Goals
 
-Four sequential goals take this repo from a vanilla-JS P2P prototype to a Next.js app with
-server-authoritative networking on PartyKit, plus a first-class agentic-coding harness.
+Sequential goals take this repo from a vanilla-JS P2P prototype to a Next.js app with
+server-authoritative networking on PartyKit, a first-class agentic-coding harness, and a
+genuinely gorgeous interface.
 
 Run them in order. Each goal's brief contains full context and explicit done-criteria, so a
 fresh session can execute it without any other context. Launch each one with:
@@ -11,6 +12,7 @@ fresh session can execute it without any other context. Launch each one with:
 /goal read goals/GOAL-2-networking.md and execute it, looping until the done-criteria are green.
 /goal read goals/GOAL-3-ui-port.md and execute it, looping until the done-criteria are green.
 /goal read goals/GOAL-4-harness-and-voice.md and execute it, looping until the done-criteria are green.
+/goal read goals/GOAL-5-visual-overhaul.md and execute it, looping until the done-criteria are green.
 ```
 
 ## Checklist
@@ -19,6 +21,7 @@ fresh session can execute it without any other context. Launch each one with:
 - [x] **Goal 2 — Networking**: PartyKit room server, zod protocol, server-side RNG, reconnect/rejoin, multi-client test
 - [x] **Goal 3 — UI port**: Lobby/game/scorecard in React, GSAP motion system, 3D dice, PWA, deploy-ready (deploy commands documented; needs PartyKit/Vercel logins)
 - [x] **Goal 4 — Harness + voice**: N-player Puppeteer sim (`npm run sim`), WebRTC voice chat, HARNESS.md
+- [ ] **Goal 5 — Visual overhaul**: design-skill-driven redesign of every screen (legacy look retired), GSAP set-pieces, restyled 3D dice, and the dice-truthfulness fix (settled faces == server dice, sim-asserted)
 
 ## The overarching priority: a great agentic-coding harness
 
@@ -36,6 +39,11 @@ trades off against harness quality, favor the harness.
 - **Animation**: **GSAP** ([gsap.com](https://gsap.com), free) is the animation library — the
   game should feel tactile and polished (tumbling dice, popping scores, morphing turn colors).
   Centralize motion tokens; always honor `prefers-reduced-motion`. See `AGENTS.md`.
+- **Visual direction** *(amended for Goal 5)*: the legacy look is retired — the design is free
+  to be modern and gorgeous, developed via the gstack design skills (`/design-consultation`,
+  `/design-shotgun`, `/design-review`). Only the game's spirit is preserved: playful, tactile,
+  player colors as identity. Dice honesty is non-negotiable: the roll animation shows exactly
+  what the server rolled.
 - **Scope**: 5 Dice only — tic-tac-toe is NOT ported. Voice chat, PWA install, and 3D dice ARE ported.
 - **Fork strategy**: diverge freely; no requirement to stay mergeable with upstream JefParker/5Dice.
 - **Trust model**: the server rolls all dice and validates every action. Clients are renderers.

@@ -22,6 +22,9 @@ status:**
   PWA (Serwist), two-browser E2E, deploy-ready.
 - ✅ **Goal 4 — Harness + voice**: N-player Puppeteer sim (`npm run sim`), WebRTC voice chat,
   and [`HARNESS.md`](HARNESS.md) — the vibecoding guide.
+- ⬜ **Goal 5 — Visual overhaul**: design-skill-driven redesign of every screen (the legacy look
+  is retired), GSAP set-pieces, restyled 3D dice, and the dice-truthfulness fix (the roll
+  animation must land showing exactly the server's dice — sim-asserted).
 
 ## Architecture
 
