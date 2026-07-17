@@ -125,6 +125,24 @@ async function playTurn(active, gc, actionLog) {
     { timeout: 30_000 },
   );
 
+  // Dice truthfulness: on the full-motion browser, the settled 3D face
+  // (data-face-up) must equal the value the server rolled (data-value) for
+  // every die. This is what makes the animation honest.
+  if (active.animated) {
+    const faces = await active.page.$$eval('[data-testid^="die-"]', (els) =>
+      els.map((el) => ({
+        value: Number(el.getAttribute("data-value")),
+        faceUp: Number(el.getAttribute("data-face-up")),
+      })),
+    );
+    for (const [i, d] of faces.entries()) {
+      if (!Number.isFinite(d.faceUp) || d.faceUp !== d.value) {
+        fail(`die ${i}: 3D shows ${d.faceUp} but server rolled ${d.value}`);
+      }
+    }
+    active._faceChecks = (active._faceChecks ?? 0) + 1;
+  }
+
   // Retry the pick/commit — a click can rarely race a re-render onto the backdrop.
   for (let attempt = 0; attempt < 5; attempt++) {
     if (!(await active.page.$(".commit-overlay"))) {
@@ -366,7 +384,9 @@ async function run() {
   }
 
   if (!animationSeen) fail("never observed a 3D dice animation");
-  log("✓ 3D dice animation confirmed");
+  const faceChecks = players.reduce((n, p) => n + (p._faceChecks ?? 0), 0);
+  if (faceChecks === 0) fail("never verified a settled 3D face against the server dice");
+  log(`✓ 3D dice animation confirmed; settled faces matched server dice on ${faceChecks} rolls`);
 
   const allErrors = players.flatMap((p) => p.errors.map((e) => `[${p.name}] ${e}`));
   if (allErrors.length) {

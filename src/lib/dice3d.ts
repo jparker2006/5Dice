@@ -1,19 +1,39 @@
 /**
  * 3D physics dice overlay — a TypeScript port of legacy/dice3d.js (Three.js +
- * cannon-es). The math and choreography are preserved from the original:
- * dice spawn above the viewport, tumble under heavy gravity inside invisible
- * walls for ~1.5s, then lerp-settle onto the 2D dice slots with the correct
- * face up. Held dice snap in place with a blue tint.
+ * cannon-es). Dice spawn above the viewport and tumble under heavy gravity
+ * inside invisible walls, then settle onto the 2D dice slots showing exactly
+ * the server's roll. Held dice snap in place.
  *
- * Deliberately imperative (no React inside): the Dice3DOverlay component owns
- * an instance via ref and calls roll()/snapToState(). Consumers must call
- * destroy() on unmount.
+ * Truthfulness (the key correctness property): a die can end in 24 distinct
+ * orientations with the target value face-up (the target face × 4 in-plane
+ * spins). Rather than snap to one canonical orientation — which visibly flips
+ * the die from whatever physics showed to the "official" value — we take over
+ * while the die is still moving and settle it to the orientation *closest* to
+ * its live physics pose. The correction is a small final roll, not a lie, and
+ * the settled top face always equals the server value (asserted by the sim via
+ * the `data-face-up` attribute mirrored onto each die's target element).
+ *
+ * Deliberately imperative (no React inside): the GameRoom component owns an
+ * instance via ref and calls roll()/snapToState(). Call destroy() on unmount.
  */
 import * as THREE from "three";
 import * as CANNON from "cannon-es";
 
-const ROLL_MS = 1500;
-const SETTLE_MS = 500;
+// Take over from physics while the dice are still moving (they first hit the
+// floor ~425ms in), so there is never a visible "rested on the wrong face,
+// then flipped" moment — the settle reads as the die's final roll.
+const ROLL_MS = 700;
+const SETTLE_MS = 520;
+
+/** Cube face normals → the value printed on that face (see faceMaterials). */
+const FACE_NORMALS: { n: THREE.Vector3; v: number }[] = [
+  { n: new THREE.Vector3(1, 0, 0), v: 3 },
+  { n: new THREE.Vector3(-1, 0, 0), v: 4 },
+  { n: new THREE.Vector3(0, 1, 0), v: 1 },
+  { n: new THREE.Vector3(0, -1, 0), v: 6 },
+  { n: new THREE.Vector3(0, 0, 1), v: 2 },
+  { n: new THREE.Vector3(0, 0, -1), v: 5 },
+];
 
 interface RollData {
   finalValues: number[];
@@ -47,6 +67,10 @@ export class Dice3D {
   private snapData: SnapData | null = null;
   private rollStartTime = 0;
   private settleStartTime = 0;
+  /** The 4 face-up orientations (one per in-plane spin) for each value 1–6. */
+  private orientationsByValue = new Map<number, THREE.Quaternion[]>();
+  /** The settled orientation per die, so idle re-snapping preserves the roll. */
+  private restQuats: (THREE.Quaternion | null)[] = [null, null, null, null, null];
   private onResize = (): void => {
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
@@ -133,10 +157,64 @@ export class Dice3D {
       mesh.position.set(100, 100, 100);
     }
 
+    this.buildOrientations();
+
     window.addEventListener("resize", this.onResize);
     // The 2D dice hide themselves while the overlay owns the visuals.
     document.body.classList.add("dice3d-active");
     this.animate();
+  }
+
+  /** Precompute the 4 valid face-up orientations (in-plane spins) per value. */
+  private buildOrientations(): void {
+    const ySpins = [0, Math.PI / 2, Math.PI, -Math.PI / 2].map((a) =>
+      new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), a),
+    );
+    for (let v = 1; v <= 6; v++) {
+      const base = this.getTargetRotation(v);
+      this.orientationsByValue.set(
+        v,
+        ySpins.map((s) => s.clone().multiply(base)),
+      );
+    }
+  }
+
+  /** The face-up orientation for `value` requiring the least rotation from `current`. */
+  private closestOrientation(
+    value: number,
+    current: THREE.Quaternion,
+  ): THREE.Quaternion {
+    const candidates = this.orientationsByValue.get(value)!;
+    let best = candidates[0]!;
+    let bestDot = -Infinity;
+    for (const c of candidates) {
+      const dot = Math.abs(c.dot(current)); // |dot| handles quaternion double-cover
+      if (dot > bestDot) {
+        bestDot = dot;
+        best = c;
+      }
+    }
+    return best.clone();
+  }
+
+  /** The die value currently facing the camera (largest +Y world component). */
+  private faceUp(q: THREE.Quaternion): number {
+    let bestV = 0;
+    let bestY = -Infinity;
+    const tmp = new THREE.Vector3();
+    for (const f of FACE_NORMALS) {
+      const y = tmp.copy(f.n).applyQuaternion(q).y;
+      if (y > bestY) {
+        bestY = y;
+        bestV = f.v;
+      }
+    }
+    return bestV;
+  }
+
+  /** Mirror the actual on-screen face onto the die's target element for tests. */
+  private setFaceAttr(el: HTMLElement | null, q: THREE.Quaternion): void {
+    if (el) el.dataset.faceUp = String(this.faceUp(q));
   }
 
   /** Map face values 1–6 onto BoxGeometry face order (r, l, t, b, f, back). */
@@ -254,6 +332,8 @@ export class Dice3D {
       heldState: targetElements.map((_, i) => !unheldIndices.includes(i)),
       targetElements,
     };
+    // Fresh roll: forget last roll's settled orientations.
+    this.restQuats = [null, null, null, null, null];
 
     for (let i = 0; i < 5; i++) {
       const { pos, size } = this.targetFor(targetElements[i] ?? null);
@@ -284,6 +364,7 @@ export class Dice3D {
         this.diceBodies[i]!.type = CANNON.Body.DYNAMIC;
         this.diceBodies[i]!.wakeUp();
       } else {
+        // Held die: snap in place at the canonical orientation.
         this.diceMeshes[i]!.material = this.faceMaterials(true);
         this.diceBodies[i]!.type = CANNON.Body.KINEMATIC;
         this.diceBodies[i]!.position.copy(pos as unknown as CANNON.Vec3);
@@ -292,6 +373,8 @@ export class Dice3D {
         this.diceBodies[i]!.angularVelocity.set(0, 0, 0);
         this.diceMeshes[i]!.position.copy(pos);
         this.diceMeshes[i]!.quaternion.copy(rot);
+        this.restQuats[i] = rot.clone();
+        this.setFaceAttr(targetElements[i] ?? null, rot);
       }
     }
   }
@@ -303,6 +386,8 @@ export class Dice3D {
   ): void {
     this.rolling = false;
     this.settling = false;
+    // A fresh non-roll state (e.g. a new turn): no settled roll to preserve.
+    this.restQuats = [null, null, null, null, null];
     this.snapData = { finalValues, heldState, targetElements };
     this.applySnap();
   }
@@ -318,7 +403,8 @@ export class Dice3D {
         continue;
       }
       this.diceMeshes[i]!.scale.setScalar(size);
-      const rot = this.getTargetRotation(finalValues[i]!);
+      // Preserve the just-settled orientation; fall back to canonical otherwise.
+      const rot = this.restQuats[i] ?? this.getTargetRotation(finalValues[i]!);
       this.diceBodies[i]!.type = CANNON.Body.KINEMATIC;
       this.diceBodies[i]!.position.copy(pos as unknown as CANNON.Vec3);
       this.diceBodies[i]!.quaternion.copy(rot as unknown as CANNON.Quaternion);
@@ -327,6 +413,7 @@ export class Dice3D {
       this.diceMeshes[i]!.material = this.faceMaterials(!!heldState[i]);
       this.diceMeshes[i]!.position.copy(pos);
       this.diceMeshes[i]!.quaternion.copy(rot);
+      this.setFaceAttr(targetElements[i] ?? null, rot);
     }
   }
 
@@ -361,6 +448,12 @@ export class Dice3D {
           this.diceBodies[i]!.angularVelocity.set(0, 0, 0);
           this.rollData.startLerpPos[i] = this.diceMeshes[i]!.position.clone();
           this.rollData.startLerpQuats[i] = this.diceMeshes[i]!.quaternion.clone();
+          // Settle to the face-up orientation nearest the live physics pose,
+          // so the die's last motion reads as a natural roll into place.
+          this.rollData.targets[i]!.rot = this.closestOrientation(
+            this.rollData.finalValues[i]!,
+            this.diceMeshes[i]!.quaternion,
+          );
         }
       }
     } else if (this.settling && this.rollData) {
@@ -388,6 +481,14 @@ export class Dice3D {
         );
       }
       if (t >= 1) {
+        // Lock in the settled orientation and publish the true on-screen face.
+        for (const i of this.rollData.unheldIndices) {
+          this.restQuats[i] = this.rollData.targets[i]!.rot.clone();
+          this.setFaceAttr(
+            this.snapData?.targetElements[i] ?? null,
+            this.diceMeshes[i]!.quaternion,
+          );
+        }
         this.rolling = false;
         this.settling = false;
         this.rollData.onComplete?.();
