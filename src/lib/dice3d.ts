@@ -1,29 +1,32 @@
 /**
- * 3D physics dice overlay — a TypeScript port of legacy/dice3d.js (Three.js +
- * cannon-es). Dice spawn above the viewport and tumble under heavy gravity
- * inside invisible walls, then settle onto the 2D dice slots showing exactly
- * the server's roll. Held dice snap in place.
+ * 3D physics dice overlay — Three.js + cannon-es. Dice spawn above the felt
+ * and tumble under gravity inside invisible walls until they come to a natural
+ * rest, then glide a short distance into their row.
  *
- * Truthfulness (the key correctness property): a die can end in 24 distinct
- * orientations with the target value face-up (the target face × 4 in-plane
- * spins). Rather than snap to one canonical orientation — which visibly flips
- * the die from whatever physics showed to the "official" value — we take over
- * while the die is still moving and settle it to the orientation *closest* to
- * its live physics pose. The correction is a small final roll, not a lie, and
- * the settled top face always equals the server value (asserted by the sim via
- * the `data-face-up` attribute mirrored onto each die's target element).
+ * Truthfulness (the load-bearing correctness property): a die must settle
+ * showing exactly the value the server rolled. We get this *physically* rather
+ * than by snapping: before animating, each die's throw is pre-simulated
+ * (rejection sampling) until it comes to rest showing the target value, and the
+ * visible roll replays that exact throw. Dice don't collide with each other
+ * (collision groups), so each die is deterministic and its solo pre-sim matches
+ * the live roll. A safety correction guarantees the final face is the target
+ * even if floating-point paths diverge — so the die never rests on a lie, and
+ * the sim asserts the settled `data-face-up` equals the server's die.
  *
- * Deliberately imperative (no React inside): the GameRoom component owns an
- * instance via ref and calls roll()/snapToState(). Call destroy() on unmount.
+ * Deliberately imperative (no React inside): GameRoom owns an instance via ref
+ * and calls roll()/snapToState(). Call destroy() on unmount.
  */
 import * as THREE from "three";
 import * as CANNON from "cannon-es";
 
-// Take over from physics while the dice are still moving (they first hit the
-// floor ~425ms in), so there is never a visible "rested on the wrong face,
-// then flipped" moment — the settle reads as the die's final roll.
-const ROLL_MS = 700;
-const SETTLE_MS = 520;
+const GRAVITY = -34; // a touch gentler than before → a longer, rollier tumble
+const MIN_ROLL_MS = 650; // always show at least this much tumble
+const MAX_ROLL_MS = 2800; // safety cap if a die never fully rests
+const GLIDE_MS = 360; // gentle slide from rest position into the slot row
+const REST_LIN = 0.35; // linear speed² below which a die counts as at rest
+const REST_ANG = 0.45; // angular speed² below which a die counts as at rest
+const DICE_GROUP = 2;
+const STATIC_GROUP = 1;
 
 /** Cube face normals → the value printed on that face (see faceMaterials). */
 const FACE_NORMALS: { n: THREE.Vector3; v: number }[] = [
@@ -35,13 +38,24 @@ const FACE_NORMALS: { n: THREE.Vector3; v: number }[] = [
   { n: new THREE.Vector3(0, 0, -1), v: 5 },
 ];
 
+interface Throw {
+  pos: CANNON.Vec3;
+  vel: CANNON.Vec3;
+  angVel: CANNON.Vec3;
+  quat: CANNON.Quaternion;
+}
+
 interface RollData {
   finalValues: number[];
   unheldIndices: number[];
-  targets: { pos: THREE.Vector3; rot: THREE.Quaternion }[];
+  slotPos: THREE.Vector3[];
   onComplete?: () => void;
-  startLerpQuats: THREE.Quaternion[];
-  startLerpPos: THREE.Vector3[];
+  rested: boolean[];
+  restPos: (THREE.Vector3 | null)[];
+  restQuat: (THREE.Quaternion | null)[];
+  finalQuat: (THREE.Quaternion | null)[];
+  gliding: boolean;
+  glideStart: number;
 }
 
 interface SnapData {
@@ -56,20 +70,21 @@ export class Dice3D {
   private camera: THREE.PerspectiveCamera;
   private renderer: THREE.WebGLRenderer;
   private world: CANNON.World;
+  private diceMaterial: CANNON.Material;
   private diceMeshes: THREE.Mesh[] = [];
   private diceBodies: CANNON.Body[] = [];
   private normalMaterials: THREE.MeshLambertMaterial[];
   private heldMaterials: THREE.MeshLambertMaterial[];
+  /** A throwaway world + die used to pre-solve each throw off-screen. */
+  private solverWorld: CANNON.World;
+  private solverBody: CANNON.Body;
   rolling = false;
-  private settling = false;
+  private settling = false; // true once every unheld die has come to rest
   private destroyed = false;
   private rollData: RollData | null = null;
   private snapData: SnapData | null = null;
   private rollStartTime = 0;
-  private settleStartTime = 0;
-  /** The 4 face-up orientations (one per in-plane spin) for each value 1–6. */
   private orientationsByValue = new Map<number, THREE.Quaternion[]>();
-  /** The settled orientation per die, so idle re-snapping preserves the roll. */
   private restQuats: (THREE.Quaternion | null)[] = [null, null, null, null, null];
   private onResize = (): void => {
     this.camera.aspect = window.innerWidth / window.innerHeight;
@@ -113,31 +128,12 @@ export class Dice3D {
     dirLight.position.set(10, 20, 10);
     this.scene.add(dirLight);
 
-    // Physics: floor + four invisible walls forming the tumbling arena.
-    this.world = new CANNON.World({ gravity: new CANNON.Vec3(0, -40, 0) });
-    const addPlane = (
-      position: [number, number, number],
-      euler: [number, number, number],
-    ): void => {
-      const body = new CANNON.Body({ mass: 0 });
-      body.addShape(new CANNON.Plane());
-      body.position.set(...position);
-      body.quaternion.setFromEuler(...euler);
-      this.world.addBody(body);
-    };
-    addPlane([0, 0, 0], [-Math.PI / 2, 0, 0]); // floor
-    addPlane([0, 0, -5], [0, 0, 0]);
-    addPlane([0, 0, 5], [0, Math.PI, 0]);
-    addPlane([-4, 0, 0], [0, Math.PI / 2, 0]);
-    addPlane([4, 0, 0], [0, -Math.PI / 2, 0]);
-
-    const material = new CANNON.Material();
-    this.world.addContactMaterial(
-      new CANNON.ContactMaterial(material, material, {
-        friction: 0.3,
-        restitution: 0.5,
-      }),
-    );
+    // Visible physics world + an identical off-screen solver world.
+    this.diceMaterial = new CANNON.Material();
+    this.world = Dice3D.buildArena(this.diceMaterial);
+    this.solverWorld = Dice3D.buildArena(this.diceMaterial);
+    this.solverBody = Dice3D.makeDieBody(this.diceMaterial);
+    this.solverWorld.addBody(this.solverBody);
 
     // Ivory dice with espresso pips; held dice take a warm gold tint.
     this.normalMaterials = this.createDiceMaterials("#f4ede0", "#ddccae", "#241c14");
@@ -149,8 +145,7 @@ export class Dice3D {
       this.scene.add(mesh);
       this.diceMeshes.push(mesh);
 
-      const body = new CANNON.Body({ mass: 1, material });
-      body.addShape(new CANNON.Box(new CANNON.Vec3(0.5, 0.5, 0.5)));
+      const body = Dice3D.makeDieBody(this.diceMaterial);
       this.world.addBody(body);
       this.diceBodies.push(body);
 
@@ -161,61 +156,43 @@ export class Dice3D {
     this.buildOrientations();
 
     window.addEventListener("resize", this.onResize);
-    // The 2D dice hide themselves while the overlay owns the visuals.
     document.body.classList.add("dice3d-active");
     this.animate();
   }
 
-  /** Precompute the 4 valid face-up orientations (in-plane spins) per value. */
-  private buildOrientations(): void {
-    const ySpins = [0, Math.PI / 2, Math.PI, -Math.PI / 2].map((a) =>
-      new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), a),
+  /** A world with the floor + four walls forming the tumbling arena. */
+  private static buildArena(mat: CANNON.Material): CANNON.World {
+    const world = new CANNON.World({ gravity: new CANNON.Vec3(0, GRAVITY, 0) });
+    const addPlane = (
+      position: [number, number, number],
+      euler: [number, number, number],
+    ): void => {
+      const body = new CANNON.Body({ mass: 0 });
+      body.addShape(new CANNON.Plane());
+      body.position.set(...position);
+      body.quaternion.setFromEuler(...euler);
+      body.collisionFilterGroup = STATIC_GROUP;
+      body.collisionFilterMask = -1; // collide with everything (incl. dice)
+      world.addBody(body);
+    };
+    addPlane([0, 0, 0], [-Math.PI / 2, 0, 0]); // floor
+    addPlane([0, 0, -5], [0, 0, 0]);
+    addPlane([0, 0, 5], [0, Math.PI, 0]);
+    addPlane([-4, 0, 0], [0, Math.PI / 2, 0]);
+    addPlane([4, 0, 0], [0, -Math.PI / 2, 0]);
+    world.addContactMaterial(
+      new CANNON.ContactMaterial(mat, mat, { friction: 0.35, restitution: 0.4 }),
     );
-    for (let v = 1; v <= 6; v++) {
-      const base = this.getTargetRotation(v);
-      this.orientationsByValue.set(
-        v,
-        ySpins.map((s) => s.clone().multiply(base)),
-      );
-    }
+    return world;
   }
 
-  /** The face-up orientation for `value` requiring the least rotation from `current`. */
-  private closestOrientation(
-    value: number,
-    current: THREE.Quaternion,
-  ): THREE.Quaternion {
-    const candidates = this.orientationsByValue.get(value)!;
-    let best = candidates[0]!;
-    let bestDot = -Infinity;
-    for (const c of candidates) {
-      const dot = Math.abs(c.dot(current)); // |dot| handles quaternion double-cover
-      if (dot > bestDot) {
-        bestDot = dot;
-        best = c;
-      }
-    }
-    return best.clone();
-  }
-
-  /** The die value currently facing the camera (largest +Y world component). */
-  private faceUp(q: THREE.Quaternion): number {
-    let bestV = 0;
-    let bestY = -Infinity;
-    const tmp = new THREE.Vector3();
-    for (const f of FACE_NORMALS) {
-      const y = tmp.copy(f.n).applyQuaternion(q).y;
-      if (y > bestY) {
-        bestY = y;
-        bestV = f.v;
-      }
-    }
-    return bestV;
-  }
-
-  /** Mirror the actual on-screen face onto the die's target element for tests. */
-  private setFaceAttr(el: HTMLElement | null, q: THREE.Quaternion): void {
-    if (el) el.dataset.faceUp = String(this.faceUp(q));
+  /** A unit die body that collides with the arena but NOT with other dice. */
+  private static makeDieBody(mat: CANNON.Material): CANNON.Body {
+    const body = new CANNON.Body({ mass: 1, material: mat });
+    body.addShape(new CANNON.Box(new CANNON.Vec3(0.5, 0.5, 0.5)));
+    body.collisionFilterGroup = DICE_GROUP;
+    body.collisionFilterMask = STATIC_GROUP; // ignore other dice → deterministic
+    return body;
   }
 
   /** Map face values 1–6 onto BoxGeometry face order (r, l, t, b, f, back). */
@@ -292,6 +269,55 @@ export class Dice3D {
     return new THREE.Quaternion().setFromEuler(rot);
   }
 
+  private buildOrientations(): void {
+    const ySpins = [0, Math.PI / 2, Math.PI, -Math.PI / 2].map((a) =>
+      new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), a),
+    );
+    for (let v = 1; v <= 6; v++) {
+      const base = this.getTargetRotation(v);
+      this.orientationsByValue.set(
+        v,
+        ySpins.map((s) => s.clone().multiply(base)),
+      );
+    }
+  }
+
+  private closestOrientation(
+    value: number,
+    current: THREE.Quaternion,
+  ): THREE.Quaternion {
+    const candidates = this.orientationsByValue.get(value)!;
+    let best = candidates[0]!;
+    let bestDot = -Infinity;
+    for (const c of candidates) {
+      const dot = Math.abs(c.dot(current));
+      if (dot > bestDot) {
+        bestDot = dot;
+        best = c;
+      }
+    }
+    return best.clone();
+  }
+
+  /** The die value currently facing the camera (largest +Y world component). */
+  private faceUp(q: THREE.Quaternion): number {
+    let bestV = 0;
+    let bestY = -Infinity;
+    const tmp = new THREE.Vector3();
+    for (const f of FACE_NORMALS) {
+      const y = tmp.copy(f.n).applyQuaternion(q).y;
+      if (y > bestY) {
+        bestY = y;
+        bestV = f.v;
+      }
+    }
+    return bestV;
+  }
+
+  private setFaceAttr(el: HTMLElement | null, q: THREE.Quaternion): void {
+    if (el) el.dataset.faceUp = String(this.faceUp(q));
+  }
+
   private targetFor(
     el: HTMLElement | null,
   ): { pos: THREE.Vector3; size: number } {
@@ -310,6 +336,71 @@ export class Dice3D {
     return { pos, size };
   }
 
+  /**
+   * Rejection-sample a throw whose die comes to rest showing `target`, by
+   * fast-forwarding the off-screen solver world. Returns the winning initial
+   * conditions, or null if none landed on target in the try budget.
+   */
+  private solveThrow(size: number, laneX: number, target: number): Throw | null {
+    const half = size / 2;
+    this.solverBody.shapes[0] = new CANNON.Box(new CANNON.Vec3(half, half, half));
+    this.solverBody.updateBoundingRadius();
+    for (let attempt = 0; attempt < 60; attempt++) {
+      const t: Throw = {
+        pos: new CANNON.Vec3(laneX + (Math.random() - 0.5) * 1.2, 7 + Math.random() * 3, (Math.random() - 0.5) * 3),
+        vel: new CANNON.Vec3((Math.random() - 0.5) * 8, -12 - Math.random() * 4, (Math.random() - 0.5) * 8),
+        angVel: new CANNON.Vec3(
+          (Math.random() - 0.5) * 26,
+          (Math.random() - 0.5) * 26,
+          (Math.random() - 0.5) * 26,
+        ),
+        quat: new CANNON.Quaternion().setFromEuler(
+          Math.random() * Math.PI * 2,
+          Math.random() * Math.PI * 2,
+          Math.random() * Math.PI * 2,
+        ),
+      };
+      this.applyThrow(this.solverBody, t);
+      let rested = false;
+      for (let step = 0; step < 480; step++) {
+        this.solverWorld.step(1 / 60);
+        if (this.isAtRest(this.solverBody, half)) {
+          rested = true;
+          break;
+        }
+      }
+      if (!rested) continue;
+      if (this.faceUp(this.cannonQuat(this.solverBody)) === target) return t;
+    }
+    return null;
+  }
+
+  private applyThrow(body: CANNON.Body, t: Throw): void {
+    body.type = CANNON.Body.DYNAMIC;
+    body.position.copy(t.pos);
+    body.velocity.copy(t.vel);
+    body.angularVelocity.copy(t.angVel);
+    body.quaternion.copy(t.quat);
+    body.wakeUp();
+  }
+
+  private isAtRest(body: CANNON.Body, half: number): boolean {
+    return (
+      body.velocity.lengthSquared() < REST_LIN &&
+      body.angularVelocity.lengthSquared() < REST_ANG &&
+      body.position.y < half * 1.6
+    );
+  }
+
+  private cannonQuat(body: CANNON.Body): THREE.Quaternion {
+    return new THREE.Quaternion(
+      body.quaternion.x,
+      body.quaternion.y,
+      body.quaternion.z,
+      body.quaternion.w,
+    );
+  }
+
   roll(
     finalValues: number[],
     unheldIndices: number[],
@@ -319,53 +410,49 @@ export class Dice3D {
     this.rolling = true;
     this.settling = false;
     this.rollStartTime = performance.now();
-    this.rollData = {
-      finalValues,
-      unheldIndices,
-      targets: [],
-      onComplete,
-      startLerpQuats: [],
-      startLerpPos: [],
-    };
-    // Remember for post-roll snapping (scroll/resize while idle).
     this.snapData = {
       finalValues,
       heldState: targetElements.map((_, i) => !unheldIndices.includes(i)),
       targetElements,
     };
-    // Fresh roll: forget last roll's settled orientations.
     this.restQuats = [null, null, null, null, null];
+
+    this.rollData = {
+      finalValues,
+      unheldIndices,
+      slotPos: [],
+      onComplete,
+      rested: [false, false, false, false, false],
+      restPos: [null, null, null, null, null],
+      restQuat: [null, null, null, null, null],
+      finalQuat: [null, null, null, null, null],
+      gliding: false,
+      glideStart: 0,
+    };
 
     for (let i = 0; i < 5; i++) {
       const { pos, size } = this.targetFor(targetElements[i] ?? null);
       this.diceMeshes[i]!.scale.setScalar(size);
-      this.diceBodies[i]!.shapes[0] = new CANNON.Box(
-        new CANNON.Vec3(size / 2, size / 2, size / 2),
-      );
-      const rot = this.getTargetRotation(finalValues[i]!);
-      this.rollData.targets.push({ pos, rot });
+      const half = size / 2;
+      this.diceBodies[i]!.shapes[0] = new CANNON.Box(new CANNON.Vec3(half, half, half));
+      this.diceBodies[i]!.updateBoundingRadius();
+      this.rollData.slotPos.push(pos);
 
       if (unheldIndices.includes(i)) {
         this.diceMeshes[i]!.material = this.faceMaterials(false);
-        this.diceBodies[i]!.position.set(
-          (Math.random() - 0.5) * 5,
-          8 + Math.random() * 4,
-          (Math.random() - 0.5) * 5,
-        );
-        this.diceBodies[i]!.velocity.set(
-          (Math.random() - 0.5) * 10,
-          -15,
-          (Math.random() - 0.5) * 10,
-        );
-        this.diceBodies[i]!.angularVelocity.set(
-          Math.random() * 20,
-          Math.random() * 20,
-          Math.random() * 20,
-        );
-        this.diceBodies[i]!.type = CANNON.Body.DYNAMIC;
-        this.diceBodies[i]!.wakeUp();
+        const laneX = (i - 2) * 1.4;
+        // Pre-solve a throw that physically rests on the target value.
+        const solved = this.solveThrow(size, laneX, finalValues[i]!);
+        const t: Throw = solved ?? {
+          pos: new CANNON.Vec3(laneX, 8, 0),
+          vel: new CANNON.Vec3(0, -14, 0),
+          angVel: new CANNON.Vec3(12, 12, 12),
+          quat: new CANNON.Quaternion(),
+        };
+        this.applyThrow(this.diceBodies[i]!, t);
       } else {
         // Held die: snap in place at the canonical orientation.
+        const rot = this.getTargetRotation(finalValues[i]!);
         this.diceMeshes[i]!.material = this.faceMaterials(true);
         this.diceBodies[i]!.type = CANNON.Body.KINEMATIC;
         this.diceBodies[i]!.position.copy(pos as unknown as CANNON.Vec3);
@@ -387,7 +474,6 @@ export class Dice3D {
   ): void {
     this.rolling = false;
     this.settling = false;
-    // A fresh non-roll state (e.g. a new turn): no settled roll to preserve.
     this.restQuats = [null, null, null, null, null];
     this.snapData = { finalValues, heldState, targetElements };
     this.applySnap();
@@ -404,7 +490,6 @@ export class Dice3D {
         continue;
       }
       this.diceMeshes[i]!.scale.setScalar(size);
-      // Preserve the just-settled orientation; fall back to canonical otherwise.
       const rot = this.restQuats[i] ?? this.getTargetRotation(finalValues[i]!);
       this.diceBodies[i]!.type = CANNON.Body.KINEMATIC;
       this.diceBodies[i]!.position.copy(pos as unknown as CANNON.Vec3);
@@ -429,70 +514,53 @@ export class Dice3D {
   private animate = (): void => {
     if (this.destroyed) return;
     requestAnimationFrame(this.animate);
+    const rd = this.rollData;
 
-    if (this.rolling && !this.settling && this.rollData) {
+    if (this.rolling && !this.settling && rd) {
       this.world.step(1 / 60);
-      for (const i of this.rollData.unheldIndices) {
+      const elapsed = performance.now() - this.rollStartTime;
+      const half = this.diceMeshes[rd.unheldIndices[0] ?? 0]!.scale.x / 2;
+
+      for (const i of rd.unheldIndices) {
+        if (rd.rested[i]) continue;
         this.diceMeshes[i]!.position.copy(
           this.diceBodies[i]!.position as unknown as THREE.Vector3,
         );
         this.diceMeshes[i]!.quaternion.copy(
           this.diceBodies[i]!.quaternion as unknown as THREE.Quaternion,
         );
-      }
-      if (performance.now() - this.rollStartTime > ROLL_MS) {
-        this.settling = true;
-        this.settleStartTime = performance.now();
-        for (const i of this.rollData.unheldIndices) {
-          this.diceBodies[i]!.type = CANNON.Body.KINEMATIC;
-          this.diceBodies[i]!.velocity.set(0, 0, 0);
-          this.diceBodies[i]!.angularVelocity.set(0, 0, 0);
-          this.rollData.startLerpPos[i] = this.diceMeshes[i]!.position.clone();
-          this.rollData.startLerpQuats[i] = this.diceMeshes[i]!.quaternion.clone();
-          // Settle to the face-up orientation nearest the live physics pose,
-          // so the die's last motion reads as a natural roll into place.
-          this.rollData.targets[i]!.rot = this.closestOrientation(
-            this.rollData.finalValues[i]!,
-            this.diceMeshes[i]!.quaternion,
-          );
+        // Rest once it has actually settled on the felt (after a minimum tumble),
+        // or when the safety cap hits.
+        const settled = elapsed > MIN_ROLL_MS && this.isAtRest(this.diceBodies[i]!, half);
+        if (settled || elapsed > MAX_ROLL_MS) {
+          this.freezeAtRest(i);
         }
       }
-    } else if (this.settling && this.rollData) {
-      const t = Math.min(
-        (performance.now() - this.settleStartTime) / SETTLE_MS,
-        1,
-      );
-      const easeT = 1 - Math.pow(1 - t, 3);
-      for (const i of this.rollData.unheldIndices) {
-        this.diceMeshes[i]!.position.lerpVectors(
-          this.rollData.startLerpPos[i]!,
-          this.rollData.targets[i]!.pos,
-          easeT,
-        );
-        this.diceMeshes[i]!.quaternion.slerpQuaternions(
-          this.rollData.startLerpQuats[i]!,
-          this.rollData.targets[i]!.rot,
-          easeT,
-        );
-        this.diceBodies[i]!.position.copy(
-          this.diceMeshes[i]!.position as unknown as CANNON.Vec3,
-        );
-        this.diceBodies[i]!.quaternion.copy(
-          this.diceMeshes[i]!.quaternion as unknown as CANNON.Quaternion,
-        );
+
+      if (rd.unheldIndices.every((i) => rd.rested[i])) {
+        this.settling = true;
+        rd.gliding = true;
+        rd.glideStart = performance.now();
+      }
+    } else if (this.settling && rd) {
+      const t = Math.min((performance.now() - rd.glideStart) / GLIDE_MS, 1);
+      const ease = 1 - Math.pow(1 - t, 3);
+      for (const i of rd.unheldIndices) {
+        this.diceMeshes[i]!.position.lerpVectors(rd.restPos[i]!, rd.slotPos[i]!, ease);
+        // Orientation only moves in the rare correction case (identity slerp
+        // when the die already rested on the target).
+        this.diceMeshes[i]!.quaternion.slerpQuaternions(rd.restQuat[i]!, rd.finalQuat[i]!, ease);
+        this.diceBodies[i]!.position.copy(this.diceMeshes[i]!.position as unknown as CANNON.Vec3);
+        this.diceBodies[i]!.quaternion.copy(this.diceMeshes[i]!.quaternion as unknown as CANNON.Quaternion);
       }
       if (t >= 1) {
-        // Lock in the settled orientation and publish the true on-screen face.
-        for (const i of this.rollData.unheldIndices) {
-          this.restQuats[i] = this.rollData.targets[i]!.rot.clone();
-          this.setFaceAttr(
-            this.snapData?.targetElements[i] ?? null,
-            this.diceMeshes[i]!.quaternion,
-          );
+        for (const i of rd.unheldIndices) {
+          this.restQuats[i] = rd.finalQuat[i]!.clone();
+          this.setFaceAttr(this.snapData?.targetElements[i] ?? null, rd.finalQuat[i]!);
         }
         this.rolling = false;
         this.settling = false;
-        this.rollData.onComplete?.();
+        rd.onComplete?.();
       }
     } else if (this.snapData) {
       this.applySnap();
@@ -500,4 +568,24 @@ export class Dice3D {
 
     this.renderer.render(this.scene, this.camera);
   };
+
+  /** Freeze die i at its resting pose and compute its honest final orientation. */
+  private freezeAtRest(i: number): void {
+    const rd = this.rollData!;
+    const body = this.diceBodies[i]!;
+    body.type = CANNON.Body.KINEMATIC;
+    body.velocity.set(0, 0, 0);
+    body.angularVelocity.set(0, 0, 0);
+    const restQuat = this.diceMeshes[i]!.quaternion.clone();
+    rd.rested[i] = true;
+    rd.restPos[i] = this.diceMeshes[i]!.position.clone();
+    rd.restQuat[i] = restQuat;
+    // Common case (pre-sim worked): the rested face already IS the target, so
+    // finalQuat == restQuat and the glide keeps orientation fixed. Safety net:
+    // if physics diverged, nudge to the nearest target-face orientation.
+    rd.finalQuat[i] =
+      this.faceUp(restQuat) === rd.finalValues[i]
+        ? restQuat.clone()
+        : this.closestOrientation(rd.finalValues[i]!, restQuat);
+  }
 }
