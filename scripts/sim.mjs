@@ -21,16 +21,13 @@
  * Always writes state screenshots to sim-output/; on failure also dumps full
  * per-browser screenshots and console logs there.
  */
-import { spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
-import net from "node:net";
 import { build } from "esbuild";
 import puppeteer from "puppeteer";
+import { ensureServers, stopServers } from "./servers.mjs";
 
 const OUT = "sim-output";
-const NEXT_PORT = 3000;
-const PK_PORT = 1999;
-const BASE = `http://localhost:${NEXT_PORT}`;
+const BASE = "http://localhost:3000";
 
 const playersArg = process.argv.find((a) => a.startsWith("--players="));
 const N = Math.min(6, Math.max(2, Number(playersArg?.split("=")[1] ?? 3)));
@@ -40,43 +37,8 @@ class SimError extends Error {}
 const fail = (m) => {
   throw new SimError(m);
 };
+let ownedServers = [];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-// --- server management -----------------------------------------------------
-
-function portOpen(port) {
-  return new Promise((resolve) => {
-    const s = net.connect(port, "127.0.0.1");
-    s.on("connect", () => (s.destroy(), resolve(true)));
-    s.on("error", () => resolve(false));
-    setTimeout(() => (s.destroy(), resolve(false)), 1000);
-  });
-}
-
-async function ensureServers() {
-  const spawned = [];
-  if (!(await portOpen(PK_PORT))) {
-    log("· booting partykit dev…");
-    spawned.push(spawn("npx", ["partykit", "dev", "--port", String(PK_PORT)], {
-      stdio: "ignore",
-      detached: true,
-    }));
-  }
-  if (!(await portOpen(NEXT_PORT))) {
-    log("· booting next dev…");
-    spawned.push(spawn("npm", ["run", "dev"], { stdio: "ignore", detached: true }));
-  }
-  const deadline = Date.now() + 60_000;
-  while (Date.now() < deadline) {
-    if ((await portOpen(PK_PORT)) && (await portOpen(NEXT_PORT))) {
-      // Give next dev a beat to finish its first compile.
-      await sleep(spawned.length ? 2500 : 0);
-      return spawned;
-    }
-    await sleep(500);
-  }
-  fail("servers did not come up within 60s");
-}
 
 // --- game-core, compiled fresh for independent verification ----------------
 
@@ -226,7 +188,7 @@ async function screenshot(page, name) {
 async function run() {
   mkdirSync(OUT, { recursive: true });
   log(`\n🎲 sim: ${N} players against ${BASE}`);
-  const ownedServers = await ensureServers();
+  ownedServers = await ensureServers(log);
   const gc = await loadGameCore();
 
   // Full Chrome headless (not the shell) with software WebGL, so the 3D dice
@@ -414,13 +376,7 @@ async function run() {
   log("✓ zero console errors across all browsers");
 
   await browser.close();
-  for (const proc of ownedServers) {
-    try {
-      process.kill(-proc.pid, "SIGTERM");
-    } catch {
-      proc.kill("SIGTERM");
-    }
-  }
+  stopServers(ownedServers);
   log(`\n✅ SIM PASSED (${N} players, ${turns} turns)\n`);
 }
 
@@ -460,5 +416,6 @@ async function dumpFailure(players, label) {
 run().catch((err) => {
   console.error(`\n❌ SIM FAILED: ${err.message}`);
   if (!(err instanceof SimError)) console.error(err.stack);
+  stopServers(ownedServers);
   process.exit(1);
 });

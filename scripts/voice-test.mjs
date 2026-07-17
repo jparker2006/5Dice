@@ -16,6 +16,7 @@
  * permission, --use-fake-device-for-media-stream supplies a synthetic track.
  */
 import puppeteer from "puppeteer";
+import { ensureServers, stopServers } from "./servers.mjs";
 
 const BASE = process.env.BASE_URL ?? "http://localhost:3000";
 const log = (m) => console.log(m);
@@ -188,6 +189,7 @@ async function checkFailureIsolation(browser) {
 
 async function main() {
   log(`\n🎙️  voice test against ${BASE}`);
+  const servers = await ensureServers(log);
   const browser = await launch();
   try {
     await checkAudioConnects(browser);
@@ -196,6 +198,7 @@ async function main() {
     log("\n✅ VOICE TEST PASSED\n");
   } finally {
     await browser.close();
+    stopServers(servers);
   }
 }
 
