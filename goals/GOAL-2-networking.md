@@ -61,4 +61,6 @@ room, reconnect becomes "resubscribe and receive current state."
       errors and no state change.
 - [ ] All inbound server messages are zod-validated (grep: no `JSON.parse` result used
       without schema parse in `party/`).
+- [ ] `AGENTS.md` updated for the new server layer: `party:dev`/`test:integration` in the
+      Commands table, and the architecture/layout reflecting `party/` and `src/protocol/`.
 - [ ] Lint, typecheck, unit tests, and CI still green (add the integration tests to CI).
