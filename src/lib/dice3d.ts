@@ -9,9 +9,12 @@
  * (rejection sampling) until it comes to rest showing the target value, and the
  * visible roll replays that exact throw. Dice don't collide with each other
  * (collision groups), so each die is deterministic and its solo pre-sim matches
- * the live roll. A safety correction guarantees the final face is the target
- * even if floating-point paths diverge — so the die never rests on a lie, and
- * the sim asserts the settled `data-face-up` equals the server's die.
+ * the live roll. Each die drops in from just above its own slot, so the tumble
+ * stays over the tray. As it settles, the die eases into the nearest clean,
+ * axis-aligned orientation showing the target value — squaring up yaw and
+ * levelling any resting tilt so the dice land in a tidy, lined-up row without
+ * ever showing a face other than the server's. The sim asserts the settled
+ * `data-face-up` equals the server's die.
  *
  * Deliberately imperative (no React inside): GameRoom owns an instance via ref
  * and calls roll()/snapToState(). Call destroy() on unmount.
@@ -20,9 +23,9 @@ import * as THREE from "three";
 import * as CANNON from "cannon-es";
 
 const GRAVITY = -34; // a touch gentler than before → a longer, rollier tumble
-const MIN_ROLL_MS = 650; // always show at least this much tumble
+const MIN_ROLL_MS = 800; // always show at least this much tumble
 const MAX_ROLL_MS = 2800; // safety cap if a die never fully rests
-const GLIDE_MS = 360; // gentle slide from rest position into the slot row
+const GLIDE_MS = 420; // gentle slide + square-up from rest pose into the slot row
 const REST_LIN = 0.35; // linear speed² below which a die counts as at rest
 const REST_ANG = 0.45; // angular speed² below which a die counts as at rest
 const DICE_GROUP = 2;
@@ -341,18 +344,28 @@ export class Dice3D {
    * fast-forwarding the off-screen solver world. Returns the winning initial
    * conditions, or null if none landed on target in the try budget.
    */
-  private solveThrow(size: number, laneX: number, target: number): Throw | null {
+  private solveThrow(size: number, slot: THREE.Vector3, target: number): Throw | null {
     const half = size / 2;
     this.solverBody.shapes[0] = new CANNON.Box(new CANNON.Vec3(half, half, half));
     this.solverBody.updateBoundingRadius();
-    for (let attempt = 0; attempt < 60; attempt++) {
+    for (let attempt = 0; attempt < 80; attempt++) {
       const t: Throw = {
-        pos: new CANNON.Vec3(laneX + (Math.random() - 0.5) * 1.2, 7 + Math.random() * 3, (Math.random() - 0.5) * 3),
-        vel: new CANNON.Vec3((Math.random() - 0.5) * 8, -12 - Math.random() * 4, (Math.random() - 0.5) * 8),
+        // Drop in from just above this die's slot with only a small lateral
+        // nudge, so it tumbles down over the tray rather than flying sideways.
+        pos: new CANNON.Vec3(
+          slot.x + (Math.random() - 0.5) * 0.5,
+          5 + Math.random() * 1.5,
+          slot.z + (Math.random() - 0.5) * 0.5,
+        ),
+        vel: new CANNON.Vec3(
+          (Math.random() - 0.5) * 1.8,
+          -7 - Math.random() * 2,
+          (Math.random() - 0.5) * 1.8,
+        ),
         angVel: new CANNON.Vec3(
-          (Math.random() - 0.5) * 26,
-          (Math.random() - 0.5) * 26,
-          (Math.random() - 0.5) * 26,
+          (Math.random() - 0.5) * 24,
+          (Math.random() - 0.5) * 24,
+          (Math.random() - 0.5) * 24,
         ),
         quat: new CANNON.Quaternion().setFromEuler(
           Math.random() * Math.PI * 2,
@@ -440,13 +453,14 @@ export class Dice3D {
 
       if (unheldIndices.includes(i)) {
         this.diceMeshes[i]!.material = this.faceMaterials(false);
-        const laneX = (i - 2) * 1.4;
-        // Pre-solve a throw that physically rests on the target value.
-        const solved = this.solveThrow(size, laneX, finalValues[i]!);
+        // Pre-solve a throw that physically rests on the target value, dropping
+        // in from just above this die's own slot so the tumble stays over the
+        // tray instead of flinging the die across the screen.
+        const solved = this.solveThrow(size, pos, finalValues[i]!);
         const t: Throw = solved ?? {
-          pos: new CANNON.Vec3(laneX, 8, 0),
-          vel: new CANNON.Vec3(0, -14, 0),
-          angVel: new CANNON.Vec3(12, 12, 12),
+          pos: new CANNON.Vec3(pos.x, 6, pos.z),
+          vel: new CANNON.Vec3(0, -9, 0),
+          angVel: new CANNON.Vec3(10, 12, 8),
           quat: new CANNON.Quaternion(),
         };
         this.applyThrow(this.diceBodies[i]!, t);
@@ -580,12 +594,11 @@ export class Dice3D {
     rd.rested[i] = true;
     rd.restPos[i] = this.diceMeshes[i]!.position.clone();
     rd.restQuat[i] = restQuat;
-    // Common case (pre-sim worked): the rested face already IS the target, so
-    // finalQuat == restQuat and the glide keeps orientation fixed. Safety net:
-    // if physics diverged, nudge to the nearest target-face orientation.
-    rd.finalQuat[i] =
-      this.faceUp(restQuat) === rd.finalValues[i]
-        ? restQuat.clone()
-        : this.closestOrientation(rd.finalValues[i]!, restQuat);
+    // Square up to the nearest clean, axis-aligned orientation that shows the
+    // target value: this levels any resting tilt and snaps yaw to a right angle
+    // so the dice land in a tidy, lined-up row (the glide slerps from the
+    // physics pose into it). closestOrientation always shows `target` face-up,
+    // so the die is squared without ever resting on a lie.
+    rd.finalQuat[i] = this.closestOrientation(rd.finalValues[i]!, restQuat);
   }
 }
